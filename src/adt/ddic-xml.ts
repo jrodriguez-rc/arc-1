@@ -773,6 +773,41 @@ function elementBase64(elementXml: string): string {
   return elementXml.match(/<sktd:text[^>]*>([\s\S]*?)<\/sktd:text>/)?.[1]?.trim() ?? '';
 }
 
+/** `sktd:text` attribute of the element's `<sktd:shortText>`: Base64 of the short text, '' when none. */
+const SHORT_TEXT_ATTR = /<sktd:shortText\b[^>]*\bsktd:text="([^"]*)"/;
+
+/** Decoded short text of an element, '' when empty or absent. */
+function elementShortText(elementXml: string): string {
+  const base64 = elementXml.match(SHORT_TEXT_ATTR)?.[1] ?? '';
+  return base64 ? Buffer.from(base64, 'base64').toString('utf-8') : '';
+}
+
+/**
+ * `BDEF/BSO ZI_TRAVELTP.finalize` for a fragment id — type plus the qualified, percent-decoded
+ * name, the same spelling the undocumented-node index uses — or the bare name for the root node.
+ */
+function ktdNodeLabel(id: string): string {
+  const typeAt = id.indexOf('#type=');
+  const nameAt = typeAt < 0 ? -1 : id.indexOf(';name=', typeAt);
+  if (typeAt < 0 || nameAt < 0) return id;
+  return `${id.slice(typeAt + '#type='.length, nameAt)} ${ktdNodeQualifiedName(id)}`;
+}
+
+/**
+ * Trailer block listing every node that carries a short text. Empty string when none does.
+ * Read-only: short texts are written through SAPWrite's `shortTexts` parameter, never
+ * through the Markdown body.
+ */
+export function formatKtdShortTexts(envelopeXml: string): string {
+  const lines = findKtdElements(envelopeXml)
+    .filter((element) => element.id)
+    .map((element) => ({ label: ktdNodeLabel(element.id), text: elementShortText(element.xml) }))
+    .filter((entry) => entry.text)
+    .map((entry) => `  ${entry.label}: ${entry.text}`);
+  if (lines.length === 0) return '';
+  return ['Short texts (set with SAPWrite shortTexts=[{node,text}]):', ...lines].join('\n');
+}
+
 /**
  * The element documenting the object itself, for an envelope where nothing is
  * documented yet. Live reads show the root node's `<sktd:id>` repeating the
@@ -842,20 +877,11 @@ function ktdNodeQualifiedName(id: string): string {
 }
 
 /**
- * The unqualified name a caller types: the last dot-segment of the qualified name (`GetPhoto`,
- * `finalize`, `%_OWN`). BDEF node names are entity-qualified on the wire, so several entities may
- * share a short name — that ambiguity is deliberate and resolved by the caller, not here.
- */
-function ktdNodeShortName(id: string): string {
-  const qualified = ktdNodeQualifiedName(id);
-  return qualified.slice(qualified.lastIndexOf('.') + 1);
-}
-
-/**
  * Resolve a node reference against the envelope: exact id, then case-insensitive id,
- * then a short name (`GetPhoto`, `finalize`, `%_OWN`, the root's own name — decoded or
- * as encoded on the wire) that exactly one node carries. Returns undefined when nothing
- * matches; throws when a short name is ambiguous — it never picks one of several.
+ * then a node name that exactly one node carries — qualified (`ZI_TravelTP.GetPhoto`)
+ * or short (`GetPhoto`, `finalize`, `%_OWN`, the root's own name), decoded or as encoded
+ * on the wire (`%25_OWN`). Returns undefined when nothing matches; throws when a short
+ * name is ambiguous — it never picks one of several.
  */
 export function resolveKtdNode(envelopeXml: string, ref: string): KtdElement | undefined {
   return resolveKtdNodeIn(envelopeXml, findKtdElements(envelopeXml), ref);
@@ -875,12 +901,9 @@ function resolveKtdNodeIn(envelopeXml: string, elements: KtdElement[], ref: stri
   const byName = elements.filter((element) => {
     if (!element.id) return false;
     const raw = ktdNodeRawName(element.id);
-    const spellings = [
-      ktdNodeQualifiedName(element.id),
-      ktdNodeShortName(element.id),
-      raw,
-      raw.slice(raw.lastIndexOf('.') + 1),
-    ];
+    const decoded = ktdNodeQualifiedName(element.id);
+    const lastSegment = (name: string) => name.slice(name.lastIndexOf('.') + 1);
+    const spellings = [decoded, lastSegment(decoded), raw, lastSegment(raw)];
     return spellings.some((spelling) => spelling.toUpperCase() === upper);
   });
   if (byName.length === 1) return byName[0];
@@ -891,9 +914,10 @@ function resolveKtdNodeIn(envelopeXml: string, elements: KtdElement[], ref: stri
 /**
  * Split a Markdown body into per-node bodies — the inverse of `decodeKtdText`.
  *
- * A line is a node boundary only when it is `## ` followed by the EXACT id of an
- * element in this envelope, so ordinary Markdown headings inside a node's own
- * documentation survive the round-trip untouched.
+ * A line is a node boundary when "## " is followed by something resolveKtdNodeIn matches
+ * — an exact id, a case variant, or a node name unique in this envelope (qualified or
+ * short, decoded or as encoded on the wire). Prose headings that happen to equal a node's
+ * short name therefore bind to that node (accepted trade-off).
  *
  * Returns undefined when the body addresses no node (single-node KTD, or a freshly
  * created one); the caller then treats the whole body as that one node's text.

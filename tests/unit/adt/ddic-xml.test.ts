@@ -10,6 +10,7 @@ import {
   buildServiceBindingXml,
   buildTableTypeXml,
   decodeKtdText,
+  formatKtdShortTexts,
   formatKtdUndocumentedIndex,
   KTD_META_MARKER,
   normalizeAdtResponsible,
@@ -1141,6 +1142,15 @@ describe('ddic-xml builders', () => {
         expect(resolveKtdNode(envelope, '%_OWN')?.id).toBe(id);
       });
 
+      it('resolveKtdNode: a cross-spelling collision (one node decoded equals another raw) is ambiguous, never a guess', () => {
+        const base = '/sap/bc/adt/bo/behaviordefinitions/zi_traveltp/source/main';
+        const envelope = buildMultiEnvelope({
+          [`${base}#type=BDEF/BAT;name=%25_OWN`]: 'a',
+          [`${base}#type=BDEF/BAC;name=ZI_TravelTP.%25_OWN`]: 'b',
+        });
+        expect(() => resolveKtdNode(envelope, '%_OWN')).toThrow(/ambiguous/);
+      });
+
       it('resolveKtdNode: the ambiguity error names the document', () => {
         const base = '/sap/bc/adt/bo/behaviordefinitions/zi_traveltp/source/main';
         const envelope = buildMultiEnvelope({
@@ -1285,6 +1295,27 @@ describe('ddic-xml builders', () => {
         expect(decoded).toContain(`## ${FINALIZE_ID}`);
         expect(decoded).toContain(`## ${HTML_FN_ID}`);
         expect(decoded).toContain('HTML variant.');
+      });
+
+      it('formatKtdShortTexts lists nodes that have a short text as "<TYPE> <qualified name>: <text>"', () => {
+        const block = formatKtdShortTexts(liveEnvelope);
+        expect(block).toContain('Short texts (set with SAPWrite shortTexts=[{node,text}]):');
+        expect(block).toContain('  BDEF/BSO ZI_TRAVELTP.finalize: Saver: FINALIZE — last determinations before save');
+        // The undocumented sibling has an empty short text and is not listed.
+        expect(block).not.toContain('ReadTravelSummaryHTML');
+      });
+
+      it('formatKtdShortTexts labels a percent-encoded name decoded, and is empty when no node has a short text', () => {
+        const encoded =
+          '<sktd:docu xmlns:sktd="http://www.sap.com/wbobj/texts/sktd" adtcore:name="ZX">' +
+          `<sktd:element><sktd:id>/sap/bc/adt/bo/behaviordefinitions/zx/source/main#type=BDEF/BAT;name=%25_OWN</sktd:id><sktd:text/><sktd:shortText sktd:text="${Buffer.from('Own authorization context', 'utf-8').toString('base64')}" sktd:obligation="optional"/></sktd:element>` +
+          '</sktd:docu>';
+        expect(formatKtdShortTexts(encoded)).toContain('  BDEF/BAT %_OWN: Own authorization context');
+        const none =
+          '<sktd:docu xmlns:sktd="http://www.sap.com/wbobj/texts/sktd" adtcore:name="ZX">' +
+          '<sktd:element><sktd:id>ZX</sktd:id><sktd:text/><sktd:shortText sktd:text="" sktd:obligation="forbidden"/></sktd:element>' +
+          '</sktd:docu>';
+        expect(formatKtdShortTexts(none)).toBe('');
       });
     });
   });
