@@ -1189,3 +1189,15 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 - **Spec coverage:** §3.1 → Tasks 6–7; §3.2 → Tasks 2, 4, 5; §3.3 → Task 1; §4 → Task 3; §5 → Task 6 (all seven refusals have a test); §6 → Tasks 6–7; §7 → Task 7 step 6; §8 → Tasks 1–7 tests + Task 8 live; §9 → Task 9; §2 open point → Task 8.
 - **Type consistency:** `KtdElement { id, start, end, xml }`; `resolveKtdNodeIn(elements, ref)` / `resolveKtdNode(envelopeXml, ref)`; `KtdShortText { node, text }`; `rewriteKtdDocument(envelopeXml, markdown | undefined, shortTexts | undefined)`; `KTD_META_MARKER`, `stripKtdMetaTrailer`, `formatKtdShortTexts`, `KTD_SHORT_TEXT_MAX_LENGTH` — used with these exact names throughout.
 - **No placeholders:** every code step shows the code; the only conditional step (Task 8 3a/3b) shows both branches.
+
+## Final whole-feature review outcome (2026-09-03)
+
+Verdict: ready for PR once the paste-back no-op was pinned in CI. Applied in 7cda4a9: two
+round-trip tests (byte-identical on a compact envelope with both trailer blocks; decoded-equal on
+the live capture, whose 76-column Base64 wrapping rules out a byte comparison), move-only grouping
+of the short-text primitives in `ddic-xml.ts`, docstrings marking `rewriteKtdText` and
+`resolveKtdNode` as steps behind the entry points, spec §4 caught up with the four-spelling resolver,
+AGENTS.md row wording. Deferred as a follow-up, not for this PR: extracting the KTD section
+(~500 of 1,137 lines) into `src/adt/ktd-xml.ts` as a move-only refactor with its tests.
+
+PR step: waits on PR #2 (`fix/sktd-multi-node-write`), which this branch is stacked on.
