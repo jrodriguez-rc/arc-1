@@ -1511,6 +1511,49 @@ describe('ddic-xml builders', () => {
           '</sktd:docu>';
         expect(formatKtdShortTexts(envelope)).toContain('  ZX [node]: Some text');
       });
+      it('a whole SAPRead output pasted back as the body is a no-op — byte-identical on a compact envelope', () => {
+        // Composed exactly as read.ts does: Markdown, then the marker, then both trailer blocks
+        // (short texts AND undocumented index), so every trailer line takes part in the strip.
+        const base = '/sap/bc/adt/bo/behaviordefinitions/zi_traveltp/source/main';
+        const shortText = Buffer.from('Reads the travel summary', 'utf-8').toString('base64');
+        const envelope =
+          '<sktd:docu xmlns:sktd="http://www.sap.com/wbobj/texts/sktd" adtcore:name="ZI_TRAVELTP">' +
+          `<sktd:element><sktd:id>ZI_TRAVELTP</sktd:id><sktd:text>${Buffer.from('Root body.').toString('base64')}</sktd:text></sktd:element>` +
+          `<sktd:element><sktd:id>${base}#type=BDEF/BAF;name=ZI_TravelTP.ReadTravelSummary</sktd:id>` +
+          `<sktd:text>${Buffer.from('Function body.').toString('base64')}</sktd:text>` +
+          `<sktd:shortText sktd:text="${shortText}" sktd:obligation="optional"/></sktd:element>` +
+          `<sktd:element><sktd:id>${base}#type=BDEF/BAC;name=ZI_TravelTP.SetPhoto</sktd:id><sktd:text/>` +
+          '<sktd:shortText sktd:text="" sktd:obligation="optional"/></sktd:element>' +
+          '</sktd:docu>';
+        const trailer = [formatKtdShortTexts(envelope), formatKtdUndocumentedIndex(envelope)].filter(Boolean).join('\n\n');
+        expect(trailer).toContain('Short texts');
+        expect(trailer).toContain('Undocumented nodes: 1');
+        const sapRead = [decodeKtdText(envelope), `${KTD_META_MARKER}\n${trailer}`].join('\n\n');
+
+        expect(rewriteKtdDocument(envelope, sapRead, undefined)).toBe(envelope);
+        // Re-sending the listed short text unchanged is a no-op too.
+        expect(rewriteKtdDocument(envelope, sapRead, [{ node: 'ReadTravelSummary', text: 'Reads the travel summary' }])).toBe(
+          envelope,
+        );
+      });
+
+      it('a whole SAPRead output pasted back onto the live envelope changes no text, short text, or structure', () => {
+        // SAP line-wraps Base64 at 76 columns and ARC-1 re-encodes unwrapped, so the live
+        // capture is compared decoded rather than byte-for-byte.
+        const trailer = [formatKtdShortTexts(liveEnvelope), formatKtdUndocumentedIndex(liveEnvelope)]
+          .filter(Boolean)
+          .join('\n\n');
+        const sapRead = [decodeKtdText(liveEnvelope), `${KTD_META_MARKER}\n${trailer}`].join('\n\n');
+        const rewritten = rewriteKtdDocument(liveEnvelope, sapRead, undefined);
+
+        expect(decodeKtdText(rewritten)).toBe(decodeKtdText(liveEnvelope));
+        expect(formatKtdShortTexts(rewritten)).toBe(formatKtdShortTexts(liveEnvelope));
+        expect(formatKtdUndocumentedIndex(rewritten)).toBe(formatKtdUndocumentedIndex(liveEnvelope));
+        expect(rewritten).toContain('<sktd:text/>');
+        expect(rewritten.replace(/<sktd:text>[\s\S]*?<\/sktd:text>/g, '<sktd:text/>')).toBe(
+          liveEnvelope.replace(/<sktd:text>[\s\S]*?<\/sktd:text>/g, '<sktd:text/>'),
+        );
+      });
     });
   });
 });

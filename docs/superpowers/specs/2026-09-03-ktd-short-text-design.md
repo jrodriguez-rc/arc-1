@@ -105,8 +105,12 @@ parsing and by `shortTexts[].node`:
 1. exact id match;
 2. case-insensitive id match (root id is upper-cased on the wire while other ids spell the object
    in mixed case);
-3. **short name**: the value after `;name=` in a fragment id, or the root's own id, compared
-   case-insensitively — accepted only when exactly one element matches;
+3. **node name**: the value after `;name=` in a fragment id, or the root's own id, compared
+   case-insensitively — accepted only when exactly one element matches. Four spellings of the
+   reference are tried because the wire carries names entity-qualified and percent-encoded
+   (`ZI_TravelTP.GetPhoto`, `%25_OWN`): the qualified name and its last dot-segment, each
+   percent-decoded and as encoded on the wire — so `GetPhoto`, `ZI_TravelTP.GetPhoto`, `%_OWN`
+   and `%25_OWN` all resolve (grew during implementation, see the research note §8);
 4. otherwise an error: unknown (lists valid ids) or ambiguous (lists the candidates with full ids,
    e.g. `update` exists once per entity).
 

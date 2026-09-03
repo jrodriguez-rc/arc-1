@@ -729,6 +729,9 @@ const KTD_EMPTY_BODY_MESSAGE =
  *
  * The returned XML is suitable for a PUT to the KTD object URL with
  * content-type `application/vnd.sap.adt.sktdv2+xml`.
+ *
+ * Body-only step of `rewriteKtdDocument`, which is the entry point the handlers use: calling
+ * this directly bypasses `shortTexts`, the "nothing to write" refusal, and the trailer strip.
  */
 export function rewriteKtdText(envelopeXml: string, rawMarkdown: string): string {
   const markdown = stripKtdMetaTrailer(rawMarkdown);
@@ -763,22 +766,6 @@ export function rewriteKtdText(envelopeXml: string, rawMarkdown: string): string
   throw new Error('KTD envelope missing <sktd:text> element — cannot update documentation body.');
 }
 
-/** `sktd:obligation` attribute of the element's `<sktd:shortText>`. */
-const SHORT_TEXT_OBLIGATION_ATTR = /<sktd:shortText\b[^>]*?\bsktd:obligation="([^"]*)"/;
-
-/** `sktd:obligation` of the element's short text: 'optional' | 'forbidden' | 'mandatory' | ''. */
-function elementShortTextObligation(elementXml: string): string {
-  return elementXml.match(SHORT_TEXT_OBLIGATION_ATTR)?.[1] ?? '';
-}
-
-/** One short-text assignment: `node` is any reference `resolveKtdNode` accepts. */
-export interface KtdShortText {
-  node: string;
-  text: string;
-}
-
-/** Stated by the document's own `<sktd:instruction sktd:instructionId="shorttext">`. */
-export const KTD_SHORT_TEXT_MAX_LENGTH = 60;
 
 /**
  * Apply a Markdown body (optional) and per-node short texts (optional) to a KTD envelope in
@@ -878,6 +865,23 @@ function elementShortText(elementXml: string): string {
   const base64 = elementXml.match(SHORT_TEXT_ATTR)?.[1] ?? '';
   return base64 ? Buffer.from(base64, 'base64').toString('utf-8') : '';
 }
+
+/** `sktd:obligation` attribute of the element's `<sktd:shortText>`. */
+const SHORT_TEXT_OBLIGATION_ATTR = /<sktd:shortText\b[^>]*?\bsktd:obligation="([^"]*)"/;
+
+/** `sktd:obligation` of the element's short text: 'optional' | 'forbidden' | 'mandatory' | ''. */
+function elementShortTextObligation(elementXml: string): string {
+  return elementXml.match(SHORT_TEXT_OBLIGATION_ATTR)?.[1] ?? '';
+}
+
+/** One short-text assignment: `node` is any reference `resolveKtdNode` accepts. */
+export interface KtdShortText {
+  node: string;
+  text: string;
+}
+
+/** Stated by the document's own `<sktd:instruction sktd:instructionId="shorttext">`. */
+export const KTD_SHORT_TEXT_MAX_LENGTH = 60;
 
 /**
  * Trailer label for a node: the qualified, percent-decoded name first — the exact spelling
@@ -1004,7 +1008,8 @@ function ktdNodeQualifiedName(id: string): string {
  * then a node name that exactly one node carries — qualified (`ZI_TravelTP.GetPhoto`)
  * or short (`GetPhoto`, `finalize`, `%_OWN`, the root's own name), decoded or as encoded
  * on the wire (`%25_OWN`). Returns undefined when nothing matches; throws when a short
- * name is ambiguous — it never picks one of several.
+ * name is ambiguous — it never picks one of several. Convenience over `resolveKtdNodeIn`
+ * for callers (and tests) that do not already hold the element list.
  */
 export function resolveKtdNode(envelopeXml: string, ref: string): KtdElement | undefined {
   return resolveKtdNodeIn(envelopeXml, findKtdElements(envelopeXml), ref);
