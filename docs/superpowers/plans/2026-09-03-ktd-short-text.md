@@ -413,19 +413,21 @@ Expected: FAIL — not exported.
 After `elementBase64` in `src/adt/ddic-xml.ts`:
 
 ```ts
+/** `sktd:text` attribute of the element's `<sktd:shortText>`: Base64 of the short text, '' when none. */
 const SHORT_TEXT_ATTR = /<sktd:shortText\b[^>]*\bsktd:text="([^"]*)"/;
-const SHORT_TEXT_OBLIGATION_ATTR = /<sktd:shortText\b[^>]*\bsktd:obligation="([^"]*)"/;
 
 /** Decoded short text of an element, '' when empty or absent. */
 function elementShortText(elementXml: string): string {
   const base64 = elementXml.match(SHORT_TEXT_ATTR)?.[1] ?? '';
   return base64 ? Buffer.from(base64, 'base64').toString('utf-8') : '';
 }
+```
 
-/** `sktd:obligation` of the element's short text: 'optional' | 'forbidden' | 'mandatory' | ''. */
-function elementShortTextObligation(elementXml: string): string {
-  return elementXml.match(SHORT_TEXT_OBLIGATION_ATTR)?.[1] ?? '';
-}
+(The `sktd:obligation` reader is defined in Task 6, its first user — `noUnusedLocals` rejects a
+private function with no caller. This task also absorbs the Task 3 review Minors: the two
+resolver docstrings, the symmetric four-spelling list, and a cross-spelling-collision test.)
+
+```ts
 
 /**
  * `BDEF/BSO ZI_TRAVELTP.finalize` for a fragment id — type plus the qualified, percent-decoded
@@ -663,6 +665,14 @@ Expected: FAIL — not exported.
 In `src/adt/ddic-xml.ts`, after `rewriteKtdText`:
 
 ```ts
+/** `sktd:obligation` attribute of the element's `<sktd:shortText>`. */
+const SHORT_TEXT_OBLIGATION_ATTR = /<sktd:shortText\b[^>]*\bsktd:obligation="([^"]*)"/;
+
+/** `sktd:obligation` of the element's short text: 'optional' | 'forbidden' | 'mandatory' | ''. */
+function elementShortTextObligation(elementXml: string): string {
+  return elementXml.match(SHORT_TEXT_OBLIGATION_ATTR)?.[1] ?? '';
+}
+
 /** One short-text assignment: `node` is any reference `resolveKtdNode` accepts. */
 export interface KtdShortText {
   node: string;
