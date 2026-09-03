@@ -1118,6 +1118,38 @@ describe('ddic-xml builders', () => {
         );
       });
 
+      it('resolveKtdNode: all four spellings of a qualified, percent-encoded name resolve', () => {
+        const id = '/sap/bc/adt/bo/behaviordefinitions/zi_traveltp/source/main#type=BDEF/BAT;name=ZI_TravelTP.%25_OWN';
+        const envelope = buildMultiEnvelope({ [ROOT_ID]: 'r', [id]: 'b' });
+        for (const spelling of ['ZI_TravelTP.%_OWN', 'ZI_TravelTP.%25_OWN', '%_OWN', '%25_OWN']) {
+          expect(resolveKtdNode(envelope, spelling)?.id, spelling).toBe(id);
+        }
+      });
+
+      it('resolveKtdNode: exact id wins over another node whose short name is spelled the same, without ambiguity', () => {
+        const base = '/sap/bc/adt/bo/behaviordefinitions/zi_traveltp/source/main';
+        const envelope = buildMultiEnvelope({
+          UPDATE: 'root named like an action',
+          [`${base}#type=BDEF/BSO;name=ZI_TravelTP.update`]: 'x',
+        });
+        expect(resolveKtdNode(envelope, 'UPDATE')?.id).toBe('UPDATE');
+      });
+
+      it('resolveKtdNode: a malformed percent-encoding falls back to the raw name', () => {
+        const id = '/sap/bc/adt/bo/behaviordefinitions/zi_traveltp/source/main#type=BDEF/BAT;name=%_OWN';
+        const envelope = buildMultiEnvelope({ [ROOT_ID]: 'r', [id]: 'b' });
+        expect(resolveKtdNode(envelope, '%_OWN')?.id).toBe(id);
+      });
+
+      it('resolveKtdNode: the ambiguity error names the document', () => {
+        const base = '/sap/bc/adt/bo/behaviordefinitions/zi_traveltp/source/main';
+        const envelope = buildMultiEnvelope({
+          [`${base}#type=BDEF/BSO;name=ZI_TravelTP.update`]: 'a',
+          [`${base}#type=BDEF/BSO;name=ZI_TravelBookingTP.update`]: 'b',
+        });
+        expect(() => resolveKtdNode(envelope, 'update')).toThrow(/ambiguous in "ZI_TRAVELTP"/);
+      });
+
       it('headings accept a unique short name and still refuse an unknown ADT-shaped id', () => {
         const envelope = buildMultiEnvelope({ [ROOT_ID]: 'r', [BAT_ID]: 'b' });
         const rewritten = rewriteKtdText(envelope, '## %_OWN\n\nbat by short name');
