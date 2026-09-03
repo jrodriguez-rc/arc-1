@@ -284,8 +284,13 @@ function ktdNodeShortName(id: string): string {
 }
 ```
 
-(As implemented in commit 357b44c the two steps live in one `ktdNodeShortName`; Task 4 splits out
-`ktdNodeQualifiedName` because the trailer label needs the qualified, decoded name.)
+(Code review of 357b44c found that matching only "decoded short name OR raw full name" left two of
+the four spellings of a qualified, percent-encoded name — `ZI_TravelTP.%_OWN` and `%25_OWN` —
+unresolvable and silently treated as prose. The follow-up commit adds `ktdNodeRawName` as the single
+owner of `;name=` parsing, splits `ktdNodeQualifiedName` from `ktdNodeShortName`, matches all four
+spellings explicitly, moves the ambiguity throw into `ambiguousKtdNodeError(envelopeXml, ref,
+candidates)` naming the document, and adds tests for the spelling grid, rule precedence and the
+malformed-encoding fallback.)
 
 ```ts
 
@@ -433,10 +438,8 @@ function ktdNodeLabel(id: string): string {
 }
 ```
 
-If `ktdNodeQualifiedName` does not exist yet (Task 3 landed the decode + last-segment logic inside one
-`ktdNodeShortName`), split it first exactly as shown in Task 3's code block: `ktdNodeQualifiedName`
-does the `;name=` extraction and percent-decoding, `ktdNodeShortName` returns its last dot-segment.
-Behaviour of the resolver must not change (all 119 tests stay green).
+`ktdNodeQualifiedName` already exists after Task 3's review follow-up; reuse it, do not add another
+name parser.
 
 ```ts
 
