@@ -684,7 +684,7 @@ export function formatKtdUndocumentedIndex(envelopeXml: string): string {
   return lines.join('\n');
 }
 
-/** Stable prefix of `KTD_META_MARKER`; the strip matches on this, never on the prose. */
+/** Stable prefix of `KTD_META_MARKER`. `stripKtdMetaTrailer` matches it literally (the two are kept in sync by test). */
 const KTD_META_MARKER_PREFIX = '<!-- arc1:ktd-meta';
 
 /**
@@ -699,9 +699,10 @@ export const KTD_META_MARKER = `${KTD_META_MARKER_PREFIX} — read-only context 
 /**
  * Drop a SAPRead metadata trailer: everything from the first LINE that starts with the
  * marker prefix on. Slices the original string, so a body without a trailer is returned
- * untouched and a body with one keeps its own line endings (byte-preserving).
+ * untouched (byte-identical) and a body with one keeps its own line endings.
  */
 export function stripKtdMetaTrailer(markdown: string): string {
+  // Literal copy of KTD_META_MARKER_PREFIX — a built RegExp would need escaping; tests pin the two together.
   const at = markdown.search(/^<!-- arc1:ktd-meta/m);
   return at < 0 ? markdown : markdown.slice(0, at).trimEnd();
 }

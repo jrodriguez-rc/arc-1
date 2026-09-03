@@ -5,7 +5,7 @@
 
 import { resolveBspNameAndPath } from '../adt/bsp-path.js';
 import type { AdtClient, SourceReadResult } from '../adt/client.js';
-import { decodeKtdText, formatKtdUndocumentedIndex } from '../adt/ddic-xml.js';
+import { decodeKtdText, formatKtdUndocumentedIndex, KTD_META_MARKER } from '../adt/ddic-xml.js';
 import { extractUnknownColumn, formatUnknownColumnHint, isNotFoundError } from '../adt/errors.js';
 import { mapSapReleaseToAbaplintVersion } from '../adt/features.js';
 import { type FmParameter, type FmParameterKind, parseFmSignature } from '../adt/fm-signature.js';
@@ -555,8 +555,10 @@ export async function handleSAPRead(
         // decodeKtdText hides nodes SAP pre-created without text. List their ids compactly
         // so an undocumented node can be addressed in SAPWrite without first provoking the
         // write's refusal error to learn them.
-        const index = formatKtdUndocumentedIndex(source);
-        const text = index ? (markdown ? `${markdown}\n\n---\n${index}` : index) : markdown;
+        // Read-only trailer behind a marker the writer strips (see KTD_META_MARKER):
+        // the nodes SAP pre-created without text, which decodeKtdText hides.
+        const trailer = [formatKtdUndocumentedIndex(source)].filter(Boolean).join('\n');
+        const text = trailer ? `${markdown}${markdown ? '\n\n' : ''}${KTD_META_MARKER}\n${trailer}` : markdown;
         return cachedTextResult(text, cacheHit, revalidated, versionWarning);
       } catch (err) {
         if (isNotFoundError(err)) {

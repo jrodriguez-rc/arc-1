@@ -17,6 +17,7 @@ import { AdtClient, createClient, mockFetch } from './setup-undici-mock.js';
 
 const { handleToolCall } = await import('../../../src/handlers/dispatch.js');
 const { resetCachedFeatures, setCachedFeatures } = await import('../../../src/handlers/feature-cache.js');
+const { stripKtdMetaTrailer } = await import('../../../src/adt/ddic-xml.js');
 
 describe('SAPRead handler', () => {
   beforeEach(() => {
@@ -571,6 +572,12 @@ describe('SAPRead handler', () => {
       expect(text).toContain('BDEF/BAC (1): ZBDEF.SetPhoto');
       expect(text).toContain('BDEF/BAF (1): ZBDEF.GetPhoto');
       expect(text).not.toContain('<sktd:');
+      expect(text).toContain('<!-- arc1:ktd-meta');
+      expect(text).not.toContain('\n---\n');
+      // The trailer starts on its own line right after the body.
+      expect(text.indexOf('<!-- arc1:ktd-meta')).toBeGreaterThan(text.indexOf('Root docs.'));
+      // Producer/consumer contract: what SAPRead emits is exactly what the writer strips.
+      expect(stripKtdMetaTrailer(text)).toBe('Root docs.');
     });
 
     it('greps the decoded Markdown only — the undocumented-node index is not searched', async () => {
