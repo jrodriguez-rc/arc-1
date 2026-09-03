@@ -1525,16 +1525,18 @@ describe('ddic-xml builders', () => {
           `<sktd:element><sktd:id>${base}#type=BDEF/BAC;name=ZI_TravelTP.SetPhoto</sktd:id><sktd:text/>` +
           '<sktd:shortText sktd:text="" sktd:obligation="optional"/></sktd:element>' +
           '</sktd:docu>';
-        const trailer = [formatKtdShortTexts(envelope), formatKtdUndocumentedIndex(envelope)].filter(Boolean).join('\n\n');
+        const trailer = [formatKtdShortTexts(envelope), formatKtdUndocumentedIndex(envelope)]
+          .filter(Boolean)
+          .join('\n\n');
         expect(trailer).toContain('Short texts');
         expect(trailer).toContain('Undocumented nodes: 1');
         const sapRead = [decodeKtdText(envelope), `${KTD_META_MARKER}\n${trailer}`].join('\n\n');
 
         expect(rewriteKtdDocument(envelope, sapRead, undefined)).toBe(envelope);
         // Re-sending the listed short text unchanged is a no-op too.
-        expect(rewriteKtdDocument(envelope, sapRead, [{ node: 'ReadTravelSummary', text: 'Reads the travel summary' }])).toBe(
-          envelope,
-        );
+        expect(
+          rewriteKtdDocument(envelope, sapRead, [{ node: 'ReadTravelSummary', text: 'Reads the travel summary' }]),
+        ).toBe(envelope);
       });
 
       it('a whole SAPRead output pasted back onto the live envelope changes no text, short text, or structure', () => {

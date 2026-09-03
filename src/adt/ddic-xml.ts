@@ -766,7 +766,6 @@ export function rewriteKtdText(envelopeXml: string, rawMarkdown: string): string
   throw new Error('KTD envelope missing <sktd:text> element — cannot update documentation body.');
 }
 
-
 /**
  * Apply a Markdown body (optional) and per-node short texts (optional) to a KTD envelope in
  * one pass — the single entry point for SAPWrite. Every assignment is validated before any
