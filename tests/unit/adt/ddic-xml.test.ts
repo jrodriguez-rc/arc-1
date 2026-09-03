@@ -1402,7 +1402,11 @@ describe('ddic-xml builders', () => {
         expect(out).toContain('U2F2ZXI6IEZJTkFMSVpFIOKAlCBsYXN0IGRldGVybWluYXRpb25zIGJlZm9yZSBzYXZl');
       });
 
-      it('rewriteKtdDocument applies bodies and short texts in one pass', () => {
+      // Also the regression case for applyKtdShortTexts: it re-derives element offsets from the
+      // envelope AFTER rewriteKtdText has already spliced the body in, not from the original
+      // envelope. Stale offsets here (same node addressed by both the body heading and shortTexts)
+      // would corrupt the XML or silently drop one of the two writes.
+      it('rewriteKtdDocument applies bodies and short texts in one pass, including for the same node', () => {
         const out = rewriteKtdDocument(liveEnvelope, `## ${HTML_FN_ID}\n\nRenders the summary as HTML.`, [
           { node: HTML_FN_ID, text: 'HTML summary' },
         ]);
@@ -1445,7 +1449,12 @@ describe('ddic-xml builders', () => {
           ]),
         ).toThrow(/twice/);
         expect(() => rewriteKtdDocument(liveEnvelope, undefined, undefined)).toThrow(/nothing to write/i);
-        expect(() => rewriteKtdDocument(liveEnvelope, '', [])).toThrow(/nothing to write/i);
+      });
+
+      it('rewriteKtdDocument treats an explicit empty/whitespace body as a refusal, not "nothing to write" — even with shortTexts present', () => {
+        expect(() => rewriteKtdDocument(liveEnvelope, '', [])).toThrow(/empty body/);
+        expect(() => rewriteKtdDocument(liveEnvelope, '', [{ node: 'finalize', text: 'x' }])).toThrow(/empty body/);
+        expect(() => rewriteKtdDocument(liveEnvelope, '   ', [{ node: 'finalize', text: 'x' }])).toThrow(/empty body/);
       });
 
       it('rewriteKtdDocument refuses a node whose element has no <sktd:shortText>', () => {
@@ -1458,13 +1467,41 @@ describe('ddic-xml builders', () => {
         );
       });
 
-      it('rewriteKtdDocument validates every assignment before changing a byte (an invalid second entry leaves the first unwritten)', () => {
+      it('rewriteKtdDocument refuses the whole call when any assignment is invalid (validation precedes mutation)', () => {
         expect(() =>
           rewriteKtdDocument(liveEnvelope, undefined, [
             { node: 'ReadTravelSummaryHTML', text: 'ok' },
             { node: 'nope', text: 'x' },
           ]),
         ).toThrow(/does not exist/);
+      });
+
+      it('rewriteKtdDocument normalizes a multi-line short text onto one line before storing it, like the reader displays it', () => {
+        const out = rewriteKtdDocument(liveEnvelope, undefined, [
+          { node: 'ReadTravelSummaryHTML', text: 'line A\nline B' },
+        ]);
+        const b64 = Buffer.from('line A line B', 'utf-8').toString('base64');
+        expect(out).toContain(`<sktd:shortText sktd:text="${b64}" sktd:obligation="optional"/>`);
+      });
+
+      it('rewriteKtdDocument writes a short text even when sktd:text precedes sktd:obligation in attribute order', () => {
+        const envelope =
+          '<sktd:docu xmlns:sktd="http://www.sap.com/wbobj/texts/sktd" adtcore:name="ZX">' +
+          '<sktd:element><sktd:id>ZX</sktd:id><sktd:text/><sktd:shortText sktd:obligation="optional" sktd:text=""/></sktd:element>' +
+          '</sktd:docu>';
+        const out = rewriteKtdDocument(envelope, undefined, [{ node: 'ZX', text: 'A' }]);
+        expect(out).toContain('sktd:text="QQ=="');
+        expect(out).toContain('sktd:obligation="optional"');
+      });
+
+      it('rewriteKtdDocument does not refuse a short text on a node whose obligation is mandatory', () => {
+        const envelope =
+          '<sktd:docu xmlns:sktd="http://www.sap.com/wbobj/texts/sktd" adtcore:name="ZX">' +
+          '<sktd:element><sktd:id>ZX</sktd:id><sktd:text/><sktd:shortText sktd:text="" sktd:obligation="mandatory"/></sktd:element>' +
+          '</sktd:docu>';
+        const out = rewriteKtdDocument(envelope, undefined, [{ node: 'ZX', text: 'Required text' }]);
+        const b64 = Buffer.from('Required text', 'utf-8').toString('base64');
+        expect(out).toContain(`<sktd:shortText sktd:text="${b64}" sktd:obligation="mandatory"/>`);
       });
 
       it('formatKtdShortTexts labels a bare node id "[node]" when the envelope has no adtcore:name', () => {

@@ -708,6 +708,14 @@ export function stripKtdMetaTrailer(markdown: string): string {
 }
 
 /**
+ * Shared between `rewriteKtdText` and `rewriteKtdDocument` so the two refusal messages for an
+ * explicit-but-empty body cannot drift apart.
+ */
+const KTD_EMPTY_BODY_MESSAGE =
+  'KTD documentation update has an empty body. ARC-1 will not erase documentation from a bodyless ' +
+  'update; to clear one node, address it with "## <node id>" followed by an empty section.';
+
+/**
  * Replace the per-node <sktd:text> bodies of a <sktd:docu> envelope with
  * base64(markdown), preserving all other attributes and elements (responsible,
  * packageRef, refObject, and every node the body does not address).
@@ -725,10 +733,7 @@ export function stripKtdMetaTrailer(markdown: string): string {
 export function rewriteKtdText(envelopeXml: string, rawMarkdown: string): string {
   const markdown = stripKtdMetaTrailer(rawMarkdown);
   if (!markdown.trim()) {
-    throw new Error(
-      'KTD documentation update has an empty body. ARC-1 will not erase documentation from a bodyless ' +
-        'update; to clear one node, address it with "## <node id>" followed by an empty section.',
-    );
+    throw new Error(KTD_EMPTY_BODY_MESSAGE);
   }
   const elements = findKtdElements(envelopeXml);
   const perElement = splitKtdMarkdownByElementId(envelopeXml, markdown, elements);
@@ -785,14 +790,17 @@ export function rewriteKtdDocument(
   markdown: string | undefined,
   shortTexts: KtdShortText[] | undefined,
 ): string {
-  const body = markdown === undefined ? '' : stripKtdMetaTrailer(markdown);
+  const body = markdown === undefined ? undefined : stripKtdMetaTrailer(markdown);
   const assignments = shortTexts ?? [];
-  if (!body.trim() && assignments.length === 0) {
+  if (body !== undefined && !body.trim()) {
+    throw new Error(KTD_EMPTY_BODY_MESSAGE);
+  }
+  if (body === undefined && assignments.length === 0) {
     throw new Error(
       'KTD documentation update has nothing to write: pass "source" (node bodies), "shortTexts", or both.',
     );
   }
-  let rewritten = body.trim() ? rewriteKtdText(envelopeXml, body) : envelopeXml;
+  let rewritten = body === undefined ? envelopeXml : rewriteKtdText(envelopeXml, body);
   if (assignments.length > 0) rewritten = applyKtdShortTexts(rewritten, assignments);
   return rewritten;
 }
@@ -808,10 +816,14 @@ function applyKtdShortTexts(envelopeXml: string, assignments: KtdShortText[]): s
     if (resolved.has(element.id)) {
       throw new Error(`KTD node "${element.id}" appears twice in shortTexts — keep one entry per node.`);
     }
-    const trimmed = text.trim();
+    // A short text is single-line by nature — collapse internal whitespace the same way the
+    // reader (`formatKtdShortTexts`) displays it, so stored and displayed values agree.
+    const trimmed = text.replace(/\s+/g, ' ').trim();
+    // UTF-16 code units, which is how an ABAP CHAR60 field counts.
     if (trimmed.length > KTD_SHORT_TEXT_MAX_LENGTH) {
       throw new Error(
-        `Short text for KTD node "${element.id}" is ${trimmed.length} characters; SAP allows ${KTD_SHORT_TEXT_MAX_LENGTH}.`,
+        `Short text for KTD node "${element.id}" is ${trimmed.length} characters (UTF-16 units, as ABAP counts ` +
+          `them); SAP allows ${KTD_SHORT_TEXT_MAX_LENGTH}.`,
       );
     }
     if (!SHORT_TEXT_ATTR.test(element.xml)) {
@@ -859,7 +871,7 @@ function elementBase64(elementXml: string): string {
 }
 
 /** `sktd:text` attribute of the element's `<sktd:shortText>`: Base64 of the short text, '' when none. */
-const SHORT_TEXT_ATTR = /<sktd:shortText\b[^>]*\bsktd:text="([^"]*)"/;
+const SHORT_TEXT_ATTR = /<sktd:shortText\b[^>]*?\bsktd:text="([^"]*)"/;
 
 /** Decoded short text of an element, '' when empty or absent. */
 function elementShortText(elementXml: string): string {
