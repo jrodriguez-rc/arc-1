@@ -218,14 +218,17 @@ Resolution result type and errors are shared with `shortTexts` in Task 6, so the
 Import `resolveKtdNode` in the test file. Inside `describe('rewriteKtdText')` add:
 
 ```ts
-      it('resolveKtdNode: exact id, case-insensitive id, unique short name; ambiguous and unknown refuse', () => {
+      it('resolveKtdNode: exact id, case-insensitive id, unique short name (percent-decoded); unknown is undefined', () => {
         const envelope = buildMultiEnvelope({ [ROOT_ID]: 'r', [BAT_ID]: 'b', [BAF_ID]: 'f' });
         expect(resolveKtdNode(envelope, ROOT_ID)?.id).toBe(ROOT_ID);
         expect(resolveKtdNode(envelope, 'zi_traveltp')?.id).toBe(ROOT_ID);
+        // BAT_ID carries `name=%25_OWN` on the wire: both the decoded and the encoded spelling resolve.
         expect(resolveKtdNode(envelope, '%_OWN')?.id).toBe(BAT_ID);
+        expect(resolveKtdNode(envelope, '%25_OWN')?.id).toBe(BAT_ID);
         expect(resolveKtdNode(envelope, 'readtravelsummary')?.id).toBe(BAF_ID);
         expect(resolveKtdNode(envelope, 'ZI_TravelTP.ReadTravelSummary')?.id).toBe(BAF_ID);
         expect(resolveKtdNode(envelope, 'nope')).toBeUndefined();
+        expect(resolveKtdNode(envelope, '   ')).toBeUndefined();
       });
 
       it('resolveKtdNode: a short name shared by several nodes is ambiguous, not a guess', () => {
@@ -259,11 +262,32 @@ Expected: FAIL — not exported.
 In `src/adt/ddic-xml.ts`, after `unknownKtdNodeError`:
 
 ```ts
-/** The `name=` part of a fragment id, or the whole id for the root node. */
-function ktdNodeShortName(id: string): string {
+/**
+ * The `name=` part of a fragment id, percent-decoded (`%25_OWN` on the wire is the node
+ * `%_OWN`), or the whole id for the root node. Falls back to the raw text when the
+ * encoding is malformed. For BDEF nodes this is entity-qualified: `ZI_TravelTP.GetPhoto`.
+ */
+function ktdNodeQualifiedName(id: string): string {
   const at = id.indexOf(';name=');
-  return at < 0 ? id : id.slice(at + ';name='.length);
+  const raw = at < 0 ? id : id.slice(at + ';name='.length);
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
 }
+
+/** The unqualified node name a caller types: the last dot-segment of the qualified name (`GetPhoto`, `finalize`, `%_OWN`). */
+function ktdNodeShortName(id: string): string {
+  const qualified = ktdNodeQualifiedName(id);
+  return qualified.slice(qualified.lastIndexOf('.') + 1);
+}
+```
+
+(As implemented in commit 357b44c the two steps live in one `ktdNodeShortName`; Task 4 splits out
+`ktdNodeQualifiedName` because the trailer label needs the qualified, decoded name.)
+
+```ts
 
 /**
  * Resolve a node reference against the envelope: exact id, then case-insensitive id,
@@ -283,7 +307,13 @@ function resolveKtdNodeIn(elements: KtdElement[], ref: string): KtdElement | und
   const upper = wanted.toUpperCase();
   const byCase = elements.filter((element) => element.id.toUpperCase() === upper);
   if (byCase.length > 0) return byCase[0];
-  const byName = elements.filter((element) => element.id && ktdNodeShortName(element.id).toUpperCase() === upper);
+  // A caller may pass the name as SAP encodes it on the wire (`%25_OWN`) or decoded (`%_OWN`).
+  const byName = elements.filter((element) => {
+    if (!element.id) return false;
+    const at = element.id.indexOf(';name=');
+    const rawName = at < 0 ? element.id : element.id.slice(at + ';name='.length);
+    return ktdNodeShortName(element.id).toUpperCase() === upper || rawName.toUpperCase() === upper;
+  });
   if (byName.length === 1) return byName[0];
   if (byName.length > 1) {
     throw new Error(
@@ -354,7 +384,7 @@ Import `formatKtdShortTexts`. Add:
       it('formatKtdShortTexts lists nodes that have a short text as "<TYPE> <name>: <text>"', () => {
         const block = formatKtdShortTexts(liveEnvelope);
         expect(block).toContain('Short texts (set with SAPWrite shortTexts=[{node,text}]):');
-        expect(block).toContain('  BDEF/BSO finalize: Saver: FINALIZE — last determinations before save');
+        expect(block).toContain('  BDEF/BSO ZI_TRAVELTP.finalize: Saver: FINALIZE — last determinations before save');
         // The undocumented sibling has an empty short text and is not listed.
         expect(block).not.toContain('ReadTravelSummaryHTML');
       });
@@ -392,13 +422,23 @@ function elementShortTextObligation(elementXml: string): string {
   return elementXml.match(SHORT_TEXT_OBLIGATION_ATTR)?.[1] ?? '';
 }
 
-/** `BDEF/BSO finalize` for a fragment id, or the bare name for the root node. */
+/**
+ * `BDEF/BSO ZI_TRAVELTP.finalize` for a fragment id — type plus the qualified, percent-decoded
+ * name, the same spelling the undocumented-node index uses — or the bare name for the root node.
+ */
 function ktdNodeLabel(id: string): string {
   const typeAt = id.indexOf('#type=');
-  const nameAt = typeAt < 0 ? -1 : id.indexOf(';name=', typeAt);
-  if (typeAt < 0 || nameAt < 0) return id;
-  return `${id.slice(typeAt + '#type='.length, nameAt)} ${id.slice(nameAt + ';name='.length)}`;
+  if (typeAt < 0 || id.indexOf(';name=', typeAt) < 0) return id;
+  return `${id.slice(typeAt + '#type='.length, id.indexOf(';name=', typeAt))} ${ktdNodeQualifiedName(id)}`;
 }
+```
+
+If `ktdNodeQualifiedName` does not exist yet (Task 3 landed the decode + last-segment logic inside one
+`ktdNodeShortName`), split it first exactly as shown in Task 3's code block: `ktdNodeQualifiedName`
+does the `;name=` extraction and percent-decoding, `ktdNodeShortName` returns its last dot-segment.
+Behaviour of the resolver must not change (all 119 tests stay green).
+
+```ts
 
 /**
  * Trailer block listing every node that carries a short text. Empty string when none does.
@@ -478,10 +518,53 @@ Expected: FAIL — no marker (no undocumented nodes here, so no trailer is emitt
 import { decodeKtdText, formatKtdShortTexts, formatKtdUndocumentedIndex, KTD_META_MARKER } from '../adt/ddic-xml.js';
 ```
 
-Trailer composition:
+Trailer composition — this step also folds in the four Minor items from the Task 2 code review,
+which all sit on these same lines. Replace the whole trailer block (comments included) with:
 
 ```ts
-        const trailer = [formatKtdShortTexts(source), formatKtdUndocumentedIndex(source)].filter(Boolean).join('\n');
+        // decodeKtdText hides the nodes SAP pre-created without text, and never shows short
+        // texts. Both go into a read-only trailer behind a marker SAPWrite strips
+        // (KTD_META_MARKER): an undocumented node can be addressed in a write without first
+        // provoking the write's refusal to learn its id, and a pasted-back SAPRead result
+        // never writes this trailer into a node's body.
+        const trailer = [formatKtdShortTexts(source), formatKtdUndocumentedIndex(source)].filter(Boolean).join('\n\n');
+        const text = [markdown, trailer && `${KTD_META_MARKER}\n${trailer}`].filter(Boolean).join('\n\n');
+        return cachedTextResult(text, cacheHit, revalidated, versionWarning);
+```
+
+(Two labelled blocks read better with a blank line between them, hence `'\n\n'` between blocks; the
+body/marker separator is the same `'\n\n'` as before. All four input combinations of empty/non-empty
+`markdown`/`trailer` produce the same output as the previous nested ternary, except that the blank
+line between blocks is new.)
+
+Test adjustments in `tests/unit/handlers/read.test.ts`, same step: in the undocumented-index test
+replace the ordering assertion (`text.indexOf(...) > text.indexOf(...)`) and its comment with the
+exact layout the LLM sees:
+
+```ts
+      expect(text).toContain(`Root docs.\n\n${KTD_META_MARKER}\nUndocumented nodes: 2`);
+```
+
+(import `KTD_META_MARKER` alongside `stripKtdMetaTrailer` in the test's dynamic import). And add a
+read-level test for a fully undocumented KTD, the branch whose behaviour Task 2 changed:
+
+```ts
+    it('a KTD with nothing documented reads as marker-first trailer only, which the writer reduces to an empty body', async () => {
+      mockFetch.mockReset();
+      const envelope =
+        '<sktd:docu xmlns:sktd="http://www.sap.com/wbobj/texts/sktd" adtcore:name="ZBDEF">' +
+        '<sktd:element><sktd:id>ZBDEF</sktd:id><sktd:text/><sktd:shortText sktd:text="" sktd:obligation="forbidden"/></sktd:element>' +
+        '<sktd:element><sktd:id>/sap/bc/adt/bo/behaviordefinitions/zbdef/source/main#type=BDEF/BAF;name=ZBDEF.GetPhoto</sktd:id><sktd:text/><sktd:shortText sktd:text="" sktd:obligation="optional"/></sktd:element>' +
+        '</sktd:docu>';
+      mockFetch.mockResolvedValueOnce(mockResponse(200, envelope, { 'x-csrf-token': 'T' }));
+
+      const result = await handleToolCall(createClient(), DEFAULT_CONFIG, 'SAPRead', { type: 'SKTD', name: 'ZBDEF' });
+
+      const text = result.content[0]?.text ?? '';
+      expect(text.startsWith(KTD_META_MARKER)).toBe(true);
+      expect(text).toContain('Undocumented nodes: 2');
+      expect(stripKtdMetaTrailer(text)).toBe('');
+    });
 ```
 
 - [ ] **Step 4: Run to verify it passes**
@@ -949,7 +1032,7 @@ and add a unit test asserting `adtcore:description="HTML summary"` appears in th
 
 - [ ] **Step 3: AGENTS.md** — append to the SKTD/KTD row: `Short texts: SAPWrite shortTexts=[{node,text}] (60 chars, forbidden on root/BAE, resolver exact→case→unique short name shared with headings); SAPRead lists them in a trailer behind KTD_META_MARKER that rewriteKtdText strips.`
 
-- [ ] **Step 4: Research note §8** — `## 8. Short texts (follow-up, implemented)`: the wire facts (§2 of the spec), the `[E]` outcome of Task 8, and the trailer decision.
+- [ ] **Step 4: Research note §8** — `## 8. Short texts (follow-up, implemented)`: the wire facts (§2 of the spec), the `[E]` outcome of Task 8, and the trailer decision. In the same file, refresh the sample index block in §6 so it shows the marker line first (`<!-- arc1:ktd-meta … -->`) and the blank line between the short-text block and the index — it currently reproduces the pre-marker output and would otherwise read as the live contract.
 
 - [ ] **Step 5: Gate and commit**
 
