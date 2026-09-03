@@ -53,7 +53,9 @@ New optional parameter:
 shortTexts: [{ node: string, text: string }]
 ```
 
-- `node` — a node reference resolved by the shared resolver (§4).
+- `node` — a node reference resolved by the shared resolver (§4): the full node id, or the name
+  `SAPRead`'s trailer lists before ` [` (e.g. `GetPhoto`); the tool description says so, closing
+  the producer/consumer loop with §3.2.
 - `text` — the new short text, normalised onto one line (whitespace runs collapsed, ends trimmed) so
   the stored value equals what `SAPRead` shows; at most 60 characters counted as UTF-16 units, the way
   an ABAP CHAR60 field counts; `""` clears it.

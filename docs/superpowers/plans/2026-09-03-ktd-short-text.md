@@ -898,6 +898,13 @@ Then add:
       expect(calls.some((c) => c.method === 'PUT')).toBe(false);
     });
 
+    // Follow-up commit after the Task 7 code review adds three more handler tests: clearing a
+    // short text (`text: ""`) survives the MCP-argument normaliser and reaches SAP as
+    // `sktd:text=""`; the adapted empty-source test also asserts the mechanism it describes
+    // (`stripLlmEmptyValues({ source: '' }).source` is undefined); and a create whose POST
+    // succeeded but whose shortTexts were refused reports "Created SKTD …", the refusal, and a
+    // retry hint naming `shortTexts=[…]` but not `source=…`, with no PUT.
+
     it('rejects shortTexts on a non-KTD type at the schema', async () => {
       const result = await handleToolCall(createClient(), DEFAULT_CONFIG, 'SAPWrite', {
         action: 'update',
@@ -973,7 +980,8 @@ Extend `validateSapWriteInput`'s input type with `shortTexts?: unknown[];` and a
 
 ```ts
   if (input.shortTexts !== undefined && input.shortTexts.length > 0) {
-    const type = (input.type ?? '').toUpperCase();
+    // `type` is a Zod enum member here (like the `include` guard above), so no case folding.
+    const type = input.type ?? '';
     if (type !== 'SKTD' && type !== 'KTD') {
       ctx.addIssue({
         code: 'custom',
@@ -999,7 +1007,7 @@ After the `refObjectDescription` property in the SAPWrite definition:
           shortTexts: {
             type: 'array',
             description:
-              'SKTD/KTD update/create: per-node short texts (max 60 chars; "" clears). node = full node id or a unique node name (e.g. "GetPhoto"). May be used without "source".',
+              'SKTD/KTD update/create: per-node short texts (max 60 chars; "" clears). node = full node id, or the name SAPRead\'s trailer lists before " [" (e.g. "GetPhoto"). Works without "source".',
             items: {
               type: 'object',
               properties: {
@@ -1027,14 +1035,19 @@ After the `refObjectDescription` property in the SAPWrite definition:
 
 ```ts
     const shortTexts = args.shortTexts as KtdShortText[] | undefined;
-    if (source || shortTexts?.length) {
+    if (hasSource || shortTexts?.length) {
 ```
 
-and `body = rewriteKtdText(currentEnvelope, source);` with:
+(`hasSource` comes from `ctx`, exactly as in `update` — both call sites read the same way and neither
+depends on `||` truthiness) and `body = rewriteKtdText(currentEnvelope, source);` with:
 
 ```ts
-        body = rewriteKtdDocument(currentEnvelope, source || undefined, shortTexts);
+        body = rewriteKtdDocument(currentEnvelope, hasSource ? source : undefined, shortTexts);
 ```
+
+The partial-failure hint after a successful POST must name what the caller actually sent: `source=…`
+only when `hasSource`, `shortTexts=[…]` only when `shortTexts?.length`, comma-joined — a caller who
+sent only short texts must not be pointed at `source`.
 
 (On create an empty `source` means "no body" — the KTD is brand new, so there is nothing to erase;
 on update the handler passes `hasSource ? source : undefined`. Note from implementation: at the MCP
