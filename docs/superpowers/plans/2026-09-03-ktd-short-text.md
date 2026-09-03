@@ -1111,7 +1111,12 @@ Call `SAPWrite(action="update", type="SKTD", name="ZARC1_KTD_ROOT", shortTexts=[
 
 - [ ] **Step 2b: Confirm the length unit.** The error message claims SAP counts UTF-16 units ("as ABAP counts them"). Send a short text of 30 emoji (60 UTF-16 units, 30 code points) to the `create` node: accepted by ARC-1; if SAP also accepts it, then 31 emoji (62 units) must be refused by ARC-1 before any lock. If SAP itself rejects the 30-emoji value, or accepts a 31-emoji value sent by other means (e.g. Eclipse), soften the wording in `applyKtdShortTexts` to "characters (UTF-16 units)" without the ABAP attribution and record the observation `[E]`.
 
-- [ ] **Step 3a: If `description` followed** — no code change. Record in the research note (Task 9) with `[E]`.
+- [x] **Step 3a: If `description` followed** — no code change. Record in the research note (Task 9) with `[E]`.
+  **Outcome 2026-09-03 `[E]`:** it followed. ARC-1 wrote only `sktd:shortText/@sktd:text`; the raw
+  envelope read back showed `adtcore:objectReference/@adtcore:description="Creates one row"` set by
+  SAP, and removed again after clearing the short text. Step 3b is not needed. Also verified live:
+  30 emoji (60 UTF-16 units) accepted by SAP, 31 emoji refused by ARC-1 before any lock; `""` clears;
+  a whole SAPRead output pasted back is a no-op; bodies byte-identical throughout.
 
 - [ ] **Step 3b: If `description` did NOT follow** — extend `setKtdElementShortText` to keep both consistent:
 

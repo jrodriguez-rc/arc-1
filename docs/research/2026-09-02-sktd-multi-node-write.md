@@ -137,12 +137,14 @@ Treat the Bruno requests as a hypothesis log, not as the contract.
   narrow so a path-shaped prose heading like `## /notes/package layout` stays body content.
 
 ARC-1 still never constructs an `<sktd:element>`; it only rewrites `<sktd:text>` inside elements SAP
-returned. Given §2, nothing more is needed. `<sktd:shortText>` is left untouched — writing it would
-need a separate parameter, since it is an attribute and not part of the Markdown body.
+returned. Given §2, nothing more is needed. At this point `<sktd:shortText>` was left untouched —
+writing it would need a separate parameter, since it is an attribute and not part of the Markdown
+body (that parameter was added later exactly as predicted — see §8).
 
-No tool-schema change: nodes are addressed through the Markdown the reader already produces, so
-`SAPRead → edit → SAPWrite` round-trips and the single-node call sites are untouched. The
-`tests/fixtures/tool-definitions/*.json` LLM surface is unchanged.
+No tool-schema change for this fix: nodes are addressed through the Markdown the reader already
+produces, so `SAPRead → edit → SAPWrite` round-trips and the single-node call sites are untouched. The
+`tests/fixtures/tool-definitions/*.json` LLM surface was unchanged by the multi-node fix itself; the
+short-text follow-up in §8 is what later added the `shortTexts` property to it.
 
 ### Hardening from the adversarial review (2026-09-02)
 
@@ -245,7 +247,8 @@ base and type. The index (and, alongside it, any documented short texts) sits be
 metadata trailer, introduced by the HTML-comment marker line `KTD_META_MARKER`
 (`<!-- arc1:ktd-meta — read-only context below; SAPWrite ignores it -->`). Names in both blocks are
 percent-decoded and entity-qualified — previously the index printed raw wire names such as
-`%25_OWN`; it now prints `%_OWN`, a user-visible change to existing output:
+`%25_OWN`; it now prints `%_OWN`. (A change relative to the first cut of this index on the same
+branch, not to released behaviour — the index never existed on `main`.)
 
 ```
 <!-- arc1:ktd-meta — read-only context below; SAPWrite ignores it -->
@@ -303,8 +306,10 @@ to that node — an accepted trade-off, not a bug.
 Refusals (all raised before any ADT lock, from `rewriteKtdDocument`/`applyKtdShortTexts`):
 unknown node (lists the envelope's valid ids), ambiguous short name (lists the candidate nodes —
 the resolver never guesses), a node whose `<sktd:shortText>` is `obligation="forbidden"` (root or
-entity), text over 60 UTF-16 code units (ABAP counts a CHAR60 field in UTF-16 units, not codepoints
-— `text.length` in JS already matches), the same node addressed twice in one `shortTexts` array, an
+entity), text over 60 UTF-16 code units (`text.length` in JS; `[E]` SAP accepted a 30-emoji value —
+60 UTF-16 units, 30 code points — so the unit is consistent with how an ABAP CHAR60 field counts;
+`[I]` whether SAP itself would reject 62 units is untested, because ARC-1 refuses first), the same
+node addressed twice in one `shortTexts` array, an
 element with no `<sktd:shortText>` to write into at all (ARC-1 never synthesizes one), and calling
 with neither `source` nor `shortTexts` ("nothing to write"). `text` is normalised onto one line
 (`replace(/\s+/g, ' ').trim()`) before the length check and before encoding, matching what the
@@ -328,5 +333,22 @@ write path runs, closing the paste-back hazard by construction rather than by ca
 `SAPContext`'s KTD-block prepend and `grep` both stay on the bare Markdown, matching the reasoning in
 §6 for the undocumented-node index.
 
-Source of truth for the short text on PUT (`sktd:shortText/@sktd:text` vs
-`adtcore:objectReference/@adtcore:description`): pending live verification — see the plan's Task 8.
+### Live verification `[E]`
+
+Run 2026-09-03 against the on-prem trial system (A4H, SAP_BASIS 816) on the `$TMP` test bed
+`ZARC1_KTD_ROOT` (5-node BDEF KTD), through an MCP server built from this branch:
+
+| # | Check | Result |
+|---|-------|--------|
+| 1 | `shortTexts=[{node:"create", text:"Creates one row"}]` — node by short name | written; trailer lists `ZARC1_KTD_ROOT.create [BDEF/BSO]: Creates one row` |
+| 2 | 30 emoji (60 UTF-16 units, 30 code points) on `update` | accepted by SAP |
+| 3 | 31 emoji (62 units) on `delete` | refused by ARC-1 before any lock, naming 62 units and the 60 limit |
+| 4 | `text: ""` on `update` | cleared; the node leaves the trailer, `create` stays |
+| 5 | the whole `SAPRead` output (trailer included) pasted back as `source` | no-op: four bodies byte-identical, nothing folded into any node |
+| 6 | node bodies across the whole cycle | unchanged |
+
+**Source of truth for the short text on PUT — settled.** ARC-1 wrote only
+`sktd:shortText/@sktd:text` (Base64). The raw envelope read back afterwards shows SAP had set
+`adtcore:objectReference/@adtcore:description="Creates one row"` on the same element, and after the
+clear (check 4) that description was gone again. SAP derives `adtcore:description` from the short
+text; ARC-1 must not write it, and does not.
