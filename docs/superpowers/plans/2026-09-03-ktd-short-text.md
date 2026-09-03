@@ -388,8 +388,8 @@ Import `formatKtdShortTexts`. Add:
 ```ts
       it('formatKtdShortTexts lists nodes that have a short text as "<TYPE> <name>: <text>"', () => {
         const block = formatKtdShortTexts(liveEnvelope);
-        expect(block).toContain('Short texts (set with SAPWrite shortTexts=[{node,text}]):');
-        expect(block).toContain('  BDEF/BSO ZI_TRAVELTP.finalize: Saver: FINALIZE — last determinations before save');
+        expect(block).toContain('Short texts (SAPWrite shortTexts=[{node,text}]; node = the name before the brackets):');
+        expect(block).toContain('  ZI_TRAVELTP.finalize [BDEF/BSO]: Saver: FINALIZE — last determinations before save');
         // The undocumented sibling has an empty short text and is not listed.
         expect(block).not.toContain('ReadTravelSummaryHTML');
       });
@@ -430,13 +430,25 @@ resolver docstrings, the symmetric four-spelling list, and a cross-spelling-coll
 ```ts
 
 /**
- * `BDEF/BSO ZI_TRAVELTP.finalize` for a fragment id — type plus the qualified, percent-decoded
- * name, the same spelling the undocumented-node index uses — or the bare name for the root node.
+ * Trailer label for a node: the qualified, percent-decoded name first — the exact spelling
+ * `resolveKtdNode` accepts, so it can be copied back as `shortTexts[].node` or a `## ` heading —
+ * then the node type in brackets (`ZI_TRAVELTP.finalize [BDEF/BSO]`). The root node is its bare name.
  */
 function ktdNodeLabel(id: string): string {
+  const type = ktdNodeType(id);
+  return type ? `${ktdNodeQualifiedName(id)} [${type}]` : id;
+}
+
+/** `BDEF/BSO` for a fragment id, '' for the root node. Shared by the label and the undocumented index. */
+function ktdNodeType(id: string): string {
   const typeAt = id.indexOf('#type=');
-  if (typeAt < 0 || id.indexOf(';name=', typeAt) < 0) return id;
-  return `${id.slice(typeAt + '#type='.length, id.indexOf(';name=', typeAt))} ${ktdNodeQualifiedName(id)}`;
+  const nameAt = typeAt < 0 ? -1 : id.indexOf(';name=', typeAt);
+  return typeAt < 0 || nameAt < 0 ? '' : id.slice(typeAt + '#type='.length, nameAt);
+}
+
+/** Last dot-segment of a (qualified) node name: `ZI_TravelTP.GetPhoto` → `GetPhoto`. Used by the resolver's spelling list. */
+function lastNameSegment(name: string): string {
+  return name.slice(name.lastIndexOf('.') + 1);
 }
 ```
 
@@ -453,15 +465,24 @@ name parser.
 export function formatKtdShortTexts(envelopeXml: string): string {
   const lines = findKtdElements(envelopeXml)
     .filter((element) => element.id)
-    .map((element) => ({ label: ktdNodeLabel(element.id), text: elementShortText(element.xml) }))
+    .map((element) => ({
+      label: ktdNodeLabel(element.id),
+      // One line per node whatever SAP stored.
+      text: elementShortText(element.xml).replace(/\s+/g, ' ').trim(),
+    }))
     .filter((entry) => entry.text)
     .map((entry) => `  ${entry.label}: ${entry.text}`);
   if (lines.length === 0) return '';
-  return ['Short texts (set with SAPWrite shortTexts=[{node,text}]):', ...lines].join('\n');
+  return ['Short texts (SAPWrite shortTexts=[{node,text}]; node = the name before the brackets):', ...lines].join('\n');
 }
 ```
 
-`ktdNodeLabel` duplicates the id-splitting in `formatKtdUndocumentedIndex`; leave that function as is (it groups by base and type, a different shape).
+`formatKtdUndocumentedIndex` keeps its base/type grouping but must spell names the same way:
+use `ktdNodeType(id)` for the type and `ktdNodeQualifiedName(id)` (decoded) for the name instead of
+its own raw slicing, so one trailer never shows `%_OWN` in one block and `%25_OTHER` in the other.
+(Review outcome of commit 49fb70f: the first label format, `<TYPE> <name>`, did not resolve when
+copied back and silently became prose as a heading; the fixed format is pinned by a round-trip test
+that parses the rendered label and resolves it.)
 
 - [ ] **Step 4: Run to verify they pass**
 
@@ -506,7 +527,7 @@ Next to the undocumented-index test:
       const marker = text.indexOf('<!-- arc1:ktd-meta');
       expect(marker).toBeGreaterThan(0);
       expect(text.slice(0, marker)).not.toContain('Finalize step');
-      expect(text.slice(marker)).toContain('  BDEF/BSO ZBDEF.finalize: Finalize step');
+      expect(text.slice(marker)).toContain('  ZBDEF.finalize [BDEF/BSO]: Finalize step');
     });
 ```
 
