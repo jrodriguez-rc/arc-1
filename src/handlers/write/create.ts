@@ -10,7 +10,7 @@ import {
   unlockObject,
   updateObject,
 } from '../../adt/crud.js';
-import { normalizeAdtLanguage, rewriteKtdText } from '../../adt/ddic-xml.js';
+import { type KtdShortText, normalizeAdtLanguage, rewriteKtdDocument } from '../../adt/ddic-xml.js';
 import { activate, activateBatch } from '../../adt/devtools.js';
 import { AdtApiError } from '../../adt/errors.js';
 import { type FmParameter, spliceFmSignature } from '../../adt/fm-signature.js';
@@ -603,17 +603,18 @@ export async function writeActionCreate(ctx: SapWriteContext): Promise<ToolResul
     // Same envelope contract as the update path: fetch-then-rewrite ensures we
     // PUT back exactly the shape SAP gave us (with all the server-assigned
     // metadata), only swapping <sktd:text>.
-    if (source) {
+    const shortTexts = args.shortTexts as KtdShortText[] | undefined;
+    if (source || shortTexts?.length) {
       const { source: currentEnvelope } = await client.getKtd(name);
       let body: string;
       try {
-        body = rewriteKtdText(currentEnvelope, source);
+        body = rewriteKtdDocument(currentEnvelope, source || undefined, shortTexts);
       } catch (err) {
         // The POST above already succeeded, so the KTD exists (empty). Say so — a
         // message about the Markdown alone invites the same create again, which 409s.
         invalidateWrittenObject(type, name);
         return errorResult(
-          `Created SKTD ${name} in package ${pkg}, but the documentation body was NOT written: ` +
+          `Created SKTD ${name} in package ${pkg}, but the documentation was NOT written: ` +
             `${err instanceof Error ? err.message : String(err)}\n` +
             `The object exists — retry with SAPWrite(action="update", type="SKTD", name="${name}", source=…).`,
         );
@@ -629,7 +630,7 @@ export async function writeActionCreate(ctx: SapWriteContext): Promise<ToolResul
       );
       invalidateWrittenObject(type, name);
       return textResult(
-        `Created SKTD ${name} in package ${pkg} and wrote Markdown content.\nNext step: SAPActivate(type="SKTD", name="${name}").\n${ktdResult}`,
+        `Created SKTD ${name} in package ${pkg} and wrote its documentation.\nNext step: SAPActivate(type="SKTD", name="${name}").\n${ktdResult}`,
       );
     }
     invalidateWrittenObject();

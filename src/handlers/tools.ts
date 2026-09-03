@@ -849,6 +849,19 @@ export function getToolDefinitions(
             type: 'string',
             description: 'SKTD/KTD create: description of the parent object (shown in Eclipse tooltips).',
           },
+          shortTexts: {
+            type: 'array',
+            description:
+              'SKTD/KTD update/create: per-node short texts (max 60 chars; "" clears). node = full node id or a unique node name (e.g. "GetPhoto"). May be used without "source".',
+            items: {
+              type: 'object',
+              properties: {
+                node: { type: 'string' },
+                text: { type: 'string' },
+              },
+              required: ['node', 'text'],
+            },
+          },
           objects: {
             type: 'array',
             items: {

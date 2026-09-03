@@ -35,7 +35,8 @@ const BUDGETS = {
   // +text-pool SAPWrite actions/description (edit_text_symbols/edit_selection_texts).
   // +per-action SAPWrite description (one line per action, incl. the destructive/refusing ones).
   // +3 for SAPTransport action="diff" (action list + offset/limit properties).
-  'src/handlers/tools.ts': 1730,
+  // +14 for the SAPWrite shortTexts array property (SKTD/KTD per-node short texts).
+  'src/handlers/tools.ts': 1744,
   // +shared parseNamedItems relocated here from transport.ts (now used by ATC variants too) +
   // parseAtcSystemCheckVariant (FEAT-68 ATC variant listing) + parseFunctionModuleProperties and
   // the pre-7.52 projectexplorer function-group parser.

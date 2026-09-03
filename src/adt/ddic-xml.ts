@@ -764,7 +764,7 @@ export function rewriteKtdText(envelopeXml: string, rawMarkdown: string): string
 }
 
 /** `sktd:obligation` attribute of the element's `<sktd:shortText>`. */
-const SHORT_TEXT_OBLIGATION_ATTR = /<sktd:shortText\b[^>]*\bsktd:obligation="([^"]*)"/;
+const SHORT_TEXT_OBLIGATION_ATTR = /<sktd:shortText\b[^>]*?\bsktd:obligation="([^"]*)"/;
 
 /** `sktd:obligation` of the element's short text: 'optional' | 'forbidden' | 'mandatory' | ''. */
 function elementShortTextObligation(elementXml: string): string {

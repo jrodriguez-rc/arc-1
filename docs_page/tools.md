@@ -333,6 +333,7 @@ Create or update ABAP source code. Handles lock/modify/unlock automatically.
 | `refObjectType` | string | No | Required for SKTD/KTD create: parent ADT type/subtype such as `DDLS/DF`, `BDEF/BDO`, `SRVD/SRV`, or `DEVC/K`. |
 | `refObjectName` | string | No | SKTD/KTD create: documented parent name; defaults to `name`. |
 | `refObjectDescription` | string | No | SKTD/KTD create: parent description shown in ADT tooltips. |
+| `shortTexts` | array | No | SKTD/KTD update/create: per-node short texts (`{ node, text }`; max 60 chars, `""` clears). `node` is the full node id or a unique node name. Usable without `source`. |
 | `objects` | array | No | For `batch_create`: ordered list of objects (see below) |
 | `activateAtEnd` | boolean | No | For `batch_create` only. Default `false` (per-object inline activation). When `true`, ARC-1 writes inactive drafts for every object then issues one terminal batch-activate — SAP's activator resolves cross-references between siblings in a single pass. Use this for interdependent objects (composition-linked DDLS, RAP behavior stacks where parent references not-yet-active child). Partial-failure semantics are unchanged: a write-phase failure still breaks the loop and only the already-written subset is batch-activated. |
 

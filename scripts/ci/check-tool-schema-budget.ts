@@ -194,7 +194,7 @@ export const TOOL_SCHEMA_SCENARIOS: ToolSchemaScenario[] = [
       // action exists to prevent. Only the on-prem write scenario moved; BTP stayed under budget.
       schemaTokenEstimate: 17_700,
       descriptionTokenEstimate: 12_550,
-      descriptionCount: 265,
+      descriptionCount: 266,
       maxTotalWireBytes: WRITE_WIRE_WALL,
       maxPerToolWireBytes: PER_TOOL_WIRE_WALL,
     },
@@ -206,9 +206,9 @@ export const TOOL_SCHEMA_SCENARIOS: ToolSchemaScenario[] = [
     resolvedFeatures: { ...ALL_FEATURES_AVAILABLE, systemType: 'btp' },
     budget: {
       // Post-trim: full BTP write surface ~64.5 KB / ~16.1k schema tokens / 248 descriptions.
-      schemaTokenEstimate: 16_800,
+      schemaTokenEstimate: 16_900,
       descriptionTokenEstimate: 12_000,
-      descriptionCount: 260,
+      descriptionCount: 261,
       maxTotalWireBytes: WRITE_WIRE_WALL,
       maxPerToolWireBytes: PER_TOOL_WIRE_WALL,
     },
