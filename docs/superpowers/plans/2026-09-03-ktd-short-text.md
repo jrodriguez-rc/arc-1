@@ -1138,6 +1138,10 @@ and add a unit test asserting `adtcore:description="HTML summary"` appears in th
 
 ### Task 9: Documentation
 
+(Executed as 9a — everything below except the live-verification outcome — while Task 8 waited for
+the MCP server restart; the research note's §8 ends with an explicit "pending live verification"
+line that Task 8 replaces with the `[E]` result.)
+
 **Files:**
 - Modify: `docs_page/tools.md` (SKTD row line 88; SAPWrite parameter table after `refObjectDescription`, ~line 335)
 - Modify: `AGENTS.md` (SKTD/KTD row, line 195)
