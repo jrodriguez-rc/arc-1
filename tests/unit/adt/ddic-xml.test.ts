@@ -11,11 +11,13 @@ import {
   buildTableTypeXml,
   decodeKtdText,
   formatKtdUndocumentedIndex,
+  KTD_META_MARKER,
   normalizeAdtResponsible,
   normalizeCloudResponsible,
   normalizeSrvbBindingType,
   parseTableType,
   rewriteKtdText,
+  stripKtdMetaTrailer,
 } from '../../../src/adt/ddic-xml.js';
 
 describe('ddic-xml builders', () => {
@@ -1056,6 +1058,22 @@ describe('ddic-xml builders', () => {
         const rewritten = rewriteKtdText(envelope, `## ${BAT_ID}\n\n`);
         expect(rewritten).toContain(`<sktd:id>${BAT_ID}</sktd:id><sktd:text></sktd:text>`);
         expect(rewritten).toContain(`<sktd:text>${b64('root')}</sktd:text>`);
+      });
+
+      it('ignores a pasted-back SAPRead metadata trailer instead of folding it into the last node', () => {
+        const envelope = buildMultiEnvelope({ [ROOT_ID]: 'root', [BAT_ID]: 'bat' });
+        const pasted = `## ${ROOT_ID}\n\nnew root\n\n## ${BAT_ID}\n\nnew bat\n\n${KTD_META_MARKER}\nShort texts:\n  BDEF/BAT %_OWN: whatever\nUndocumented nodes: 3. …`;
+        const rewritten = rewriteKtdText(envelope, pasted);
+        expect(rewritten).toContain(`<sktd:text>${b64('new bat')}</sktd:text>`);
+        expect(rewritten).not.toContain(b64(`new bat\n\n${KTD_META_MARKER}`));
+        expect(decodeKtdText(rewritten)).toBe(`## ${ROOT_ID}\n\nnew root\n\n## ${BAT_ID}\n\nnew bat`);
+      });
+
+      it('stripKtdMetaTrailer cuts at the marker line and trims, leaving other text alone', () => {
+        expect(stripKtdMetaTrailer(`body\n\n${KTD_META_MARKER}\nanything`)).toBe('body');
+        expect(stripKtdMetaTrailer('body with no trailer')).toBe('body with no trailer');
+        // Only a line that STARTS with the marker counts; the text inside a body may mention it.
+        expect(stripKtdMetaTrailer(`see ${KTD_META_MARKER} inline`)).toBe(`see ${KTD_META_MARKER} inline`);
       });
 
       it('Markdown body is encoded, not interpolated as raw text (prevents XML injection via user input)', () => {

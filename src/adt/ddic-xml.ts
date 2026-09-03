@@ -685,6 +685,21 @@ export function formatKtdUndocumentedIndex(envelopeXml: string): string {
 }
 
 /**
+ * First line of the read-only metadata trailer `SAPRead` appends to a KTD (short texts,
+ * undocumented-node index). An HTML comment: invisible when the Markdown renders, and the
+ * writer cuts everything from this line on, so a whole SAPRead result pasted back into
+ * SAPWrite never folds the trailer into the last node's body.
+ */
+export const KTD_META_MARKER = '<!-- arc1:ktd-meta — read-only context below; SAPWrite ignores it -->';
+
+/** Drop a SAPRead metadata trailer (everything from the first marker LINE on). */
+export function stripKtdMetaTrailer(markdown: string): string {
+  const lines = markdown.split(/\r?\n/);
+  const at = lines.findIndex((line) => line.startsWith(KTD_META_MARKER));
+  return at < 0 ? markdown : lines.slice(0, at).join('\n').trimEnd();
+}
+
+/**
  * Replace the per-node <sktd:text> bodies of a <sktd:docu> envelope with
  * base64(markdown), preserving all other attributes and elements (responsible,
  * packageRef, refObject, and every node the body does not address).
@@ -699,7 +714,8 @@ export function formatKtdUndocumentedIndex(envelopeXml: string): string {
  * The returned XML is suitable for a PUT to the KTD object URL with
  * content-type `application/vnd.sap.adt.sktdv2+xml`.
  */
-export function rewriteKtdText(envelopeXml: string, markdown: string): string {
+export function rewriteKtdText(envelopeXml: string, rawMarkdown: string): string {
+  const markdown = stripKtdMetaTrailer(rawMarkdown);
   if (!markdown.trim()) {
     throw new Error(
       'KTD documentation update has an empty body. ARC-1 will not erase documentation from a bodyless ' +
