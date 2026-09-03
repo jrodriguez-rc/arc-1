@@ -1274,6 +1274,16 @@ describe('ddic-xml builders', () => {
         expect(index).toContain('BDEF/BAF (1): ZBDEF.GetPhoto');
       });
 
+      it('lists an undocumented node by its percent-decoded name, the same spelling as the short-text block', () => {
+        const base = '/sap/bc/adt/bo/behaviordefinitions/zx/source/main';
+        const envelope =
+          '<sktd:docu xmlns:sktd="http://www.sap.com/wbobj/texts/sktd" adtcore:name="ZX">' +
+          `<sktd:element><sktd:id>${base}#type=BDEF/BAF;name=%25_OTHER</sktd:id><sktd:text/></sktd:element>` +
+          '</sktd:docu>';
+        const index = formatKtdUndocumentedIndex(envelope);
+        expect(index).toContain('BDEF/BAF (1): %_OTHER');
+      });
+
       it('returns an empty index when every node carries text', () => {
         const envelope =
           '<sktd:docu xmlns:sktd="http://www.sap.com/wbobj/texts/sktd">' +
@@ -1297,10 +1307,12 @@ describe('ddic-xml builders', () => {
         expect(decoded).toContain('HTML variant.');
       });
 
-      it('formatKtdShortTexts lists nodes that have a short text as "<TYPE> <qualified name>: <text>"', () => {
+      it('formatKtdShortTexts lists nodes that have a short text as "<qualified name> [<TYPE>]: <text>"', () => {
         const block = formatKtdShortTexts(liveEnvelope);
-        expect(block).toContain('Short texts (set with SAPWrite shortTexts=[{node,text}]):');
-        expect(block).toContain('  BDEF/BSO ZI_TRAVELTP.finalize: Saver: FINALIZE — last determinations before save');
+        expect(block).toContain(
+          'Short texts (SAPWrite shortTexts=[{node,text}]; node = the name before the brackets):',
+        );
+        expect(block).toContain('  ZI_TRAVELTP.finalize [BDEF/BSO]: Saver: FINALIZE — last determinations before save');
         // The undocumented sibling has an empty short text and is not listed.
         expect(block).not.toContain('ReadTravelSummaryHTML');
       });
@@ -1310,12 +1322,36 @@ describe('ddic-xml builders', () => {
           '<sktd:docu xmlns:sktd="http://www.sap.com/wbobj/texts/sktd" adtcore:name="ZX">' +
           `<sktd:element><sktd:id>/sap/bc/adt/bo/behaviordefinitions/zx/source/main#type=BDEF/BAT;name=%25_OWN</sktd:id><sktd:text/><sktd:shortText sktd:text="${Buffer.from('Own authorization context', 'utf-8').toString('base64')}" sktd:obligation="optional"/></sktd:element>` +
           '</sktd:docu>';
-        expect(formatKtdShortTexts(encoded)).toContain('  BDEF/BAT %_OWN: Own authorization context');
+        expect(formatKtdShortTexts(encoded)).toContain('  %_OWN [BDEF/BAT]: Own authorization context');
         const none =
           '<sktd:docu xmlns:sktd="http://www.sap.com/wbobj/texts/sktd" adtcore:name="ZX">' +
           '<sktd:element><sktd:id>ZX</sktd:id><sktd:text/><sktd:shortText sktd:text="" sktd:obligation="forbidden"/></sktd:element>' +
           '</sktd:docu>';
         expect(formatKtdShortTexts(none)).toBe('');
+        // No <sktd:shortText> at all (not just an empty one) is also "no short text".
+        const missing =
+          '<sktd:docu xmlns:sktd="http://www.sap.com/wbobj/texts/sktd" adtcore:name="ZX">' +
+          '<sktd:element><sktd:id>ZX</sktd:id><sktd:text/></sktd:element>' +
+          '</sktd:docu>';
+        expect(formatKtdShortTexts(missing)).toBe('');
+      });
+
+      it('a rendered short-text label copies back as a node reference that resolves to its element', () => {
+        const line = formatKtdShortTexts(liveEnvelope)
+          .split('\n')
+          .find((l) => l.includes('finalize'));
+        const ref = line?.trim().split(' [')[0] ?? '';
+        expect(ref).toBe('ZI_TRAVELTP.finalize');
+        expect(resolveKtdNode(liveEnvelope, ref)?.id).toBe(FINALIZE_ID);
+      });
+
+      it('formatKtdShortTexts collapses a multi-line short text onto one line', () => {
+        const multiline = Buffer.from('line A\nline B', 'utf-8').toString('base64');
+        const envelope =
+          '<sktd:docu xmlns:sktd="http://www.sap.com/wbobj/texts/sktd" adtcore:name="ZX">' +
+          `<sktd:element><sktd:id>ZX</sktd:id><sktd:text/><sktd:shortText sktd:text="${multiline}" sktd:obligation="optional"/></sktd:element>` +
+          '</sktd:docu>';
+        expect(formatKtdShortTexts(envelope)).toContain('  ZX: line A line B');
       });
     });
   });

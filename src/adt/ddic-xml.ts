@@ -658,15 +658,13 @@ export function formatKtdUndocumentedIndex(envelopeXml: string): string {
   const roots: string[] = [];
   const namesByBaseAndType = new Map<string, Map<string, string[]>>();
   for (const id of ids) {
-    const typeAt = id.indexOf('#type=');
-    const nameAt = typeAt < 0 ? -1 : id.indexOf(';name=', typeAt);
-    if (typeAt < 0 || nameAt < 0) {
+    const type = ktdNodeType(id);
+    if (!type) {
       roots.push(id);
       continue;
     }
-    const base = id.slice(0, typeAt);
-    const type = id.slice(typeAt + '#type='.length, nameAt);
-    const nodeName = id.slice(nameAt + ';name='.length);
+    const base = id.slice(0, id.indexOf('#type='));
+    const nodeName = ktdNodeQualifiedName(id);
     const byType = namesByBaseAndType.get(base) ?? new Map<string, string[]>();
     byType.set(type, [...(byType.get(type) ?? []), nodeName]);
     namesByBaseAndType.set(base, byType);
@@ -783,14 +781,13 @@ function elementShortText(elementXml: string): string {
 }
 
 /**
- * `BDEF/BSO ZI_TRAVELTP.finalize` for a fragment id — type plus the qualified, percent-decoded
- * name, the same spelling the undocumented-node index uses — or the bare name for the root node.
+ * Trailer label for a node: the qualified, percent-decoded name first — the exact spelling
+ * `resolveKtdNode` accepts, so it can be copied back as `shortTexts[].node` or a `## ` heading —
+ * then the node type in brackets. The root node is its bare name.
  */
 function ktdNodeLabel(id: string): string {
-  const typeAt = id.indexOf('#type=');
-  const nameAt = typeAt < 0 ? -1 : id.indexOf(';name=', typeAt);
-  if (typeAt < 0 || nameAt < 0) return id;
-  return `${id.slice(typeAt + '#type='.length, nameAt)} ${ktdNodeQualifiedName(id)}`;
+  const type = ktdNodeType(id);
+  return type ? `${ktdNodeQualifiedName(id)} [${type}]` : id;
 }
 
 /**
@@ -803,9 +800,9 @@ export function formatKtdShortTexts(envelopeXml: string): string {
     .filter((element) => element.id)
     .map((element) => ({ label: ktdNodeLabel(element.id), text: elementShortText(element.xml) }))
     .filter((entry) => entry.text)
-    .map((entry) => `  ${entry.label}: ${entry.text}`);
+    .map((entry) => `  ${entry.label}: ${entry.text.replace(/\s+/g, ' ').trim()}`);
   if (lines.length === 0) return '';
-  return ['Short texts (set with SAPWrite shortTexts=[{node,text}]):', ...lines].join('\n');
+  return ['Short texts (SAPWrite shortTexts=[{node,text}]; node = the name before the brackets):', ...lines].join('\n');
 }
 
 /**
@@ -863,6 +860,18 @@ function ktdNodeRawName(id: string): string {
   return at < 0 ? id : id.slice(at + ';name='.length);
 }
 
+/** `BDEF/BSO` for a fragment id, '' for the root node. */
+function ktdNodeType(id: string): string {
+  const typeAt = id.indexOf('#type=');
+  const nameAt = typeAt < 0 ? -1 : id.indexOf(';name=', typeAt);
+  return typeAt < 0 || nameAt < 0 ? '' : id.slice(typeAt + '#type='.length, nameAt);
+}
+
+/** Last dot-segment of a (qualified) node name: `ZI_TravelTP.GetPhoto` → `GetPhoto`. */
+function lastNameSegment(name: string): string {
+  return name.slice(name.lastIndexOf('.') + 1);
+}
+
 /**
  * The node name percent-decoded but still owner-qualified (`ZI_TravelTP.%_OWN`; `%25_OWN` on
  * the wire is the node `%_OWN`). Falls back to the raw text when the encoding is malformed.
@@ -902,8 +911,7 @@ function resolveKtdNodeIn(envelopeXml: string, elements: KtdElement[], ref: stri
     if (!element.id) return false;
     const raw = ktdNodeRawName(element.id);
     const decoded = ktdNodeQualifiedName(element.id);
-    const lastSegment = (name: string) => name.slice(name.lastIndexOf('.') + 1);
-    const spellings = [decoded, lastSegment(decoded), raw, lastSegment(raw)];
+    const spellings = [decoded, lastNameSegment(decoded), raw, lastNameSegment(raw)];
     return spellings.some((spelling) => spelling.toUpperCase() === upper);
   });
   if (byName.length === 1) return byName[0];
