@@ -1076,6 +1076,21 @@ describe('ddic-xml builders', () => {
         expect(stripKtdMetaTrailer(`see ${KTD_META_MARKER} inline`)).toBe(`see ${KTD_META_MARKER} inline`);
       });
 
+      it('a trailer-only body is an empty body — refused, never written', () => {
+        expect(() => rewriteKtdText(buildEnvelope('b2xk'), `${KTD_META_MARKER}\nShort texts:\n  x: y`)).toThrow(
+          /empty body/,
+        );
+      });
+
+      it('stripKtdMetaTrailer matches the stable prefix even when the prose after it was retyped', () => {
+        expect(stripKtdMetaTrailer('body\n\n<!-- arc1:ktd-meta - read only -->\nanything')).toBe('body');
+      });
+
+      it('stripKtdMetaTrailer keeps the body bytes: CRLF input stays CRLF, nothing is re-joined', () => {
+        expect(stripKtdMetaTrailer(`line1\r\nline2\r\n\r\n${KTD_META_MARKER}\r\nanything`)).toBe('line1\r\nline2');
+        expect(stripKtdMetaTrailer('line1\r\nline2\r\n')).toBe('line1\r\nline2\r\n');
+      });
+
       it('Markdown body is encoded, not interpolated as raw text (prevents XML injection via user input)', () => {
         const malicious = '</sktd:text><evil/>not-encoded';
         const rewritten = rewriteKtdText(buildEnvelope(''), malicious);
