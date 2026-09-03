@@ -1179,7 +1179,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ### Task 10: Final gate and PR
 
 - [ ] **Step 1:** `npm test` — only the 9 pre-existing environment failures. `npm run typecheck`, `npx biome check src tests`, `npm run check:sizes`, `npm run validate:policy`, `npm run build`.
-- [ ] **Step 2:** `git diff --name-only fix/sktd-multi-node-write..HEAD | xargs grep -n -i -E "rhp|patient"` → no output (client identifiers never enter the repo).
+- [x] **Step 2:** grep the branch diff for the client namespace and object names used during live verification (the same census run before PR #2) → no output; client identifiers never enter the repo. Done 2026-09-03: only the repo's pre-existing generic transport-id examples matched.
 - [ ] **Step 3:** Once PR #2 is merged: `git rebase main`, re-run Step 1, `git push -u origin feat/ktd-short-text`, `gh pr create --base main --title "feat(write): per-node short texts for Knowledge Transfer Documents" --body-file <body>` ending with `🤖 Generated with [Claude Code](https://claude.com/claude-code)`.
 
 ---
