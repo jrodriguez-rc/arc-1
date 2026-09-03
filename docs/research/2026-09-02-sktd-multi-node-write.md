@@ -241,19 +241,92 @@ appends a compact index after the Markdown, only on `SAPRead` (not on the KTD bl
 prepends, and not in `grep` results). Listing ~68 full ids would cost ~10 KB, so the index exploits
 the id shape instead — the root id is the object name and every other id is
 `<base>#type=<TYPE>;name=<NAME>` with one `<base>` per document — and groups the names under their
-base and type:
+base and type. The index (and, alongside it, any documented short texts) sits behind a read-only
+metadata trailer, introduced by the HTML-comment marker line `KTD_META_MARKER`
+(`<!-- arc1:ktd-meta — read-only context below; SAPWrite ignores it -->`). Names in both blocks are
+percent-decoded and entity-qualified — previously the index printed raw wire names such as
+`%25_OWN`; it now prints `%_OWN`, a user-visible change to existing output:
 
 ```
-Undocumented nodes: 68. SAP pre-created them with empty text; document one by adding a "## <id>" …
+<!-- arc1:ktd-meta — read-only context below; SAPWrite ignores it -->
+Short texts (SAPWrite shortTexts=[{node,text}]; node = the name before " ["):
+  ZI_TravelTP.finalize [BDEF/BSO]: Saver: FINALIZE — last determinations before save
+
+Undocumented nodes: 68. SAP pre-created them with empty text; document one by adding a "## <name>" section using one of the node names listed below (the base and root lines are context, not names).
 base: /sap/bc/adt/bo/behaviordefinitions/zi_traveltp/source/main
 BDEF/BAE (9): ZI_TravelBookingTP, ZI_TravelSupplementTP, …
 BDEF/BAC (14): ZI_TravelTP.SetPhoto, ZI_TravelTP.DeletePhoto, …
 ```
 
-Every id is reconstructible exactly (the index is produced by splitting real ids on the first
+Every name is reconstructible exactly (the index is produced by splitting real ids on the first
 `#type=` and `;name=`, never by synthesis). Roughly 2–3 KB on the largest live object, and nothing at
-all when every node is documented.
+all when every node is documented. The index no longer teaches rebuilding a full
+id — SAPWrite now resolves a bare node name (exact, then case-insensitive, then unique short name),
+so the shorter names are directly usable. `stripKtdMetaTrailer` cuts everything from the marker line
+on before either the Markdown-body or the short-text write path runs, so a whole `SAPRead` result can
+be pasted straight back into `SAPWrite(source=...)` — the paste-back hazard the old `---` separator
+design would have had is closed by construction, not by convention.
 
 Found along the way, but pre-existing and unrelated to KTDs, so fixed on its own branch:
 `SAPRead(type="CLAS", method="lhc_x~method")` never found class-local methods because the method
 path read only `source/main` — see `docs/research/2026-09-02-sapread-method-local-class-include.md`.
+
+## 8. Short texts (follow-up, implemented)
+
+### Wire facts
+
+Every `<sktd:element>` carries its own short text as an attribute, not as element content:
+`<sktd:shortText sktd:text="BASE64" sktd:obligation="optional|forbidden"/>`, self-closing, in the
+fixed child order `id → text → objectReference → parent → shortText → link` (§2). `obligation` is
+`"forbidden"` on the object root and on entity nodes — SAP considers those self-describing — and
+`"optional"` elsewhere; ARC-1 has never observed `"mandatory"` live but the resolver treats it the
+same as `"optional"` (a short text may be written, just not required by ARC-1). The document's own
+`<sktd:instruction sktd:instructionId="shorttext">` states the 60-character limit; there is no XSD
+facet to read it from instead. The `<sktd:text>` node body's 76-character Base64 line wrapping (§2)
+is irrelevant here — the short text is a single small attribute, never line-wrapped.
+
+### Interface
+
+`SAPWrite(type="SKTD"|"KTD", action="update"|"create", shortTexts=[{node, text}])`, `source` now
+optional whenever `shortTexts` is given (previously always required). The two write paths —
+`src/handlers/write/create.ts` and `src/handlers/write/update-delete.ts` — both funnel into the one
+entry point `rewriteKtdDocument` (`src/adt/ddic-xml.ts`), which validates every assignment against
+the envelope before splicing any bytes, so a refusal never leaves a half-applied document.
+
+`node` resolves through `resolveKtdNode`/`resolveKtdNodeIn` in three passes, first match wins: exact
+id, then case-insensitive id, then a node name that exactly one node carries — qualified
+(`ZI_TravelTP.GetPhoto`) or short (`GetPhoto`, `finalize`, `%_OWN`), decoded or exactly as SAP
+encodes it on the wire (`%25_OWN`). The identical resolver backs `## <name>` Markdown headings
+(`splitKtdMarkdownByElementId`), so a prose heading that happens to equal a node's short name binds
+to that node — an accepted trade-off, not a bug.
+
+Refusals (all raised before any ADT lock, from `rewriteKtdDocument`/`applyKtdShortTexts`):
+unknown node (lists the envelope's valid ids), ambiguous short name (lists the candidate nodes —
+the resolver never guesses), a node whose `<sktd:shortText>` is `obligation="forbidden"` (root or
+entity), text over 60 UTF-16 code units (ABAP counts a CHAR60 field in UTF-16 units, not codepoints
+— `text.length` in JS already matches), the same node addressed twice in one `shortTexts` array, an
+element with no `<sktd:shortText>` to write into at all (ARC-1 never synthesizes one), and calling
+with neither `source` nor `shortTexts` ("nothing to write"). `text` is normalised onto one line
+(`replace(/\s+/g, ' ').trim()`) before the length check and before encoding, matching what the
+reader displays; `""` clears the short text.
+
+Empty-`source` semantics: at the MCP boundary, `stripLlmEmptyValues` (`src/handlers/object-types.ts`)
+strips an empty-string `source` from the arguments before Zod validation runs, so
+`SAPWrite(source="", shortTexts=[...])` is indistinguishable from omitting `source` altogether —
+"not supplied", never "supplied and empty" (which would otherwise hit the empty-body refusal).
+
+### The trailer decision
+
+The alternative to a trailer was leaving `SAPRead` untouched and making callers guess or provoke a
+refusal to learn a node's short text or its undocumented siblings — the exact problem §6 already
+solved for node discovery. Folding short texts into the same read-only block reuses that
+infrastructure instead of inventing a second one, and keeps the cost proportional to what is
+actually documented (one line per short text) rather than a flat tax on every read. The trailer sits
+behind `KTD_META_MARKER`, an HTML comment so it renders invisibly wherever the Markdown is displayed
+and is unambiguous to strip; `stripKtdMetaTrailer` cuts everything from that line on before either
+write path runs, closing the paste-back hazard by construction rather than by caller discipline.
+`SAPContext`'s KTD-block prepend and `grep` both stay on the bare Markdown, matching the reasoning in
+§6 for the undocumented-node index.
+
+Source of truth for the short text on PUT (`sktd:shortText/@sktd:text` vs
+`adtcore:objectReference/@adtcore:description`): pending live verification — see the plan's Task 8.
