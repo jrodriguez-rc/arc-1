@@ -694,6 +694,15 @@ Import `rewriteKtdDocument` and the type `KtdShortText`. Inside `describe('live 
           '</sktd:docu>';
         expect(() => rewriteKtdDocument(envelope, undefined, [{ node: 'ZX', text: 'x' }])).toThrow(/no <sktd:shortText>/);
       });
+
+      it('rewriteKtdDocument validates every assignment before changing a byte (an invalid second entry leaves the first unwritten)', () => {
+        expect(() =>
+          rewriteKtdDocument(liveEnvelope, undefined, [
+            { node: 'ReadTravelSummaryHTML', text: 'ok' },
+            { node: 'nope', text: 'x' },
+          ]),
+        ).toThrow(/does not exist/);
+      });
 ```
 
 - [ ] **Step 2: Run to verify they fail**
@@ -745,7 +754,7 @@ function applyKtdShortTexts(envelopeXml: string, assignments: KtdShortText[]): s
   const knownIds = elements.map((element) => element.id).filter(Boolean);
   const resolved = new Map<string, { element: KtdElement; text: string }>();
   for (const { node, text } of assignments) {
-    const element = resolveKtdNodeIn(elements, node);
+    const element = resolveKtdNodeIn(envelopeXml, elements, node);
     if (!element) throw unknownKtdNodeError([node], knownIds);
     if (resolved.has(element.id)) {
       throw new Error(`KTD node "${element.id}" appears twice in shortTexts — keep one entry per node.`);
@@ -784,6 +793,13 @@ function setKtdElementShortText(elementXml: string, text: string): string {
 ```
 
 Task 8 may extend `setKtdElementShortText` to also set `adtcore:objectReference/@adtcore:description`, depending on the live experiment. Do not add it now.
+
+Same commit, two Task 5 review Minors: `envelopeKtdName` returns the prose fallback `'this KTD'` for
+messages, so `formatKtdShortTexts` must not compare ids against it — add `envelopeKtdObjectName`
+(the `adtcore:name` or `''`), make `envelopeKtdName` delegate to it, and use the object name for the
+`[root]` comparison (a nameless envelope labels type-less ids `[node]` deliberately; one test). The
+index header ends `using one of the node names listed below (the base and root lines are context, not
+names).` so a model does not grab the `base:` line.
 
 - [ ] **Step 4: Run to verify they pass**
 
