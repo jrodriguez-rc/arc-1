@@ -18,6 +18,7 @@ import {
   normalizeSrvbBindingType,
   parseTableType,
   resolveKtdNode,
+  rewriteKtdDocument,
   rewriteKtdText,
   stripKtdMetaTrailer,
 } from '../../../src/adt/ddic-xml.js';
@@ -1388,6 +1389,90 @@ describe('ddic-xml builders', () => {
 
         const rewritten = rewriteKtdText(envelope, `## ${name}\n\nnew body`);
         expect(rewritten).toContain(`<sktd:text>${Buffer.from('new body', 'utf-8').toString('base64')}</sktd:text>`);
+      });
+
+      it('rewriteKtdDocument sets a short text on an optional node and re-encodes it as Base64', () => {
+        const out = rewriteKtdDocument(liveEnvelope, undefined, [
+          { node: 'ReadTravelSummaryHTML', text: 'HTML report of the summary' },
+        ]);
+        const b64 = Buffer.from('HTML report of the summary', 'utf-8').toString('base64');
+        expect(out).toContain(`<sktd:shortText sktd:text="${b64}" sktd:obligation="optional"/>`);
+        // Body untouched, sibling untouched.
+        expect(out).toContain('<sktd:text/>');
+        expect(out).toContain('U2F2ZXI6IEZJTkFMSVpFIOKAlCBsYXN0IGRldGVybWluYXRpb25zIGJlZm9yZSBzYXZl');
+      });
+
+      it('rewriteKtdDocument applies bodies and short texts in one pass', () => {
+        const out = rewriteKtdDocument(liveEnvelope, `## ${HTML_FN_ID}\n\nRenders the summary as HTML.`, [
+          { node: HTML_FN_ID, text: 'HTML summary' },
+        ]);
+        expect(out).toContain(
+          `<sktd:text>${Buffer.from('Renders the summary as HTML.', 'utf-8').toString('base64')}</sktd:text>`,
+        );
+        expect(out).toContain(
+          `sktd:text="${Buffer.from('HTML summary', 'utf-8').toString('base64')}" sktd:obligation="optional"`,
+        );
+      });
+
+      it('rewriteKtdDocument clears a short text with an empty string', () => {
+        const out = rewriteKtdDocument(liveEnvelope, undefined, [{ node: 'finalize', text: '' }]);
+        expect(out).toContain('<sktd:shortText sktd:text="" sktd:obligation="optional"/>');
+        expect(out).not.toContain('U2F2ZXI6IEZJTkFMSVpFIOKAlCBsYXN0IGRldGVybWluYXRpb25zIGJlZm9yZSBzYXZl');
+      });
+
+      it('rewriteKtdDocument refuses a short text on a node whose obligation is forbidden', () => {
+        const envelope =
+          '<sktd:docu xmlns:sktd="http://www.sap.com/wbobj/texts/sktd" adtcore:name="ZX">' +
+          '<sktd:element><sktd:id>ZX</sktd:id><sktd:text/><sktd:shortText sktd:text="" sktd:obligation="forbidden"/></sktd:element>' +
+          '</sktd:docu>';
+        expect(() => rewriteKtdDocument(envelope, undefined, [{ node: 'ZX', text: 'nope' }])).toThrow(
+          /does not take a short text/,
+        );
+      });
+
+      it('rewriteKtdDocument refuses more than 60 characters, an unknown node, a duplicate node, and an empty call', () => {
+        const long = 'x'.repeat(61);
+        expect(() => rewriteKtdDocument(liveEnvelope, undefined, [{ node: 'finalize', text: long }])).toThrow(
+          /61 characters[\s\S]*60/,
+        );
+        expect(() => rewriteKtdDocument(liveEnvelope, undefined, [{ node: 'nope', text: 'x' }])).toThrow(
+          /does not exist/,
+        );
+        expect(() =>
+          rewriteKtdDocument(liveEnvelope, undefined, [
+            { node: 'finalize', text: 'a' },
+            { node: FINALIZE_ID, text: 'b' },
+          ]),
+        ).toThrow(/twice/);
+        expect(() => rewriteKtdDocument(liveEnvelope, undefined, undefined)).toThrow(/nothing to write/i);
+        expect(() => rewriteKtdDocument(liveEnvelope, '', [])).toThrow(/nothing to write/i);
+      });
+
+      it('rewriteKtdDocument refuses a node whose element has no <sktd:shortText>', () => {
+        const envelope =
+          '<sktd:docu xmlns:sktd="http://www.sap.com/wbobj/texts/sktd" adtcore:name="ZX">' +
+          '<sktd:element><sktd:id>ZX</sktd:id><sktd:text/></sktd:element>' +
+          '</sktd:docu>';
+        expect(() => rewriteKtdDocument(envelope, undefined, [{ node: 'ZX', text: 'x' }])).toThrow(
+          /no <sktd:shortText>/,
+        );
+      });
+
+      it('rewriteKtdDocument validates every assignment before changing a byte (an invalid second entry leaves the first unwritten)', () => {
+        expect(() =>
+          rewriteKtdDocument(liveEnvelope, undefined, [
+            { node: 'ReadTravelSummaryHTML', text: 'ok' },
+            { node: 'nope', text: 'x' },
+          ]),
+        ).toThrow(/does not exist/);
+      });
+
+      it('formatKtdShortTexts labels a bare node id "[node]" when the envelope has no adtcore:name', () => {
+        const envelope =
+          '<sktd:docu xmlns:sktd="http://www.sap.com/wbobj/texts/sktd">' +
+          `<sktd:element><sktd:id>ZX</sktd:id><sktd:text/><sktd:shortText sktd:text="${Buffer.from('Some text', 'utf-8').toString('base64')}" sktd:obligation="optional"/></sktd:element>` +
+          '</sktd:docu>';
+        expect(formatKtdShortTexts(envelope)).toContain('  ZX [node]: Some text');
       });
     });
   });

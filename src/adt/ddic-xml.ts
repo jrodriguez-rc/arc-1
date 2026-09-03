@@ -674,7 +674,7 @@ export function formatKtdUndocumentedIndex(envelopeXml: string): string {
 
   const lines = [
     `Undocumented nodes: ${ids.length}. SAP pre-created them with empty text; document one by adding a ` +
-      '"## <name>" section using a name listed below.',
+      '"## <name>" section using one of the node names listed below (the base and root lines are context, not names).',
   ];
   for (const root of roots) lines.push(`root: ${root}`);
   for (const [base, byType] of namesByBaseAndType) {
@@ -758,6 +758,91 @@ export function rewriteKtdText(envelopeXml: string, rawMarkdown: string): string
   throw new Error('KTD envelope missing <sktd:text> element — cannot update documentation body.');
 }
 
+/** `sktd:obligation` attribute of the element's `<sktd:shortText>`. */
+const SHORT_TEXT_OBLIGATION_ATTR = /<sktd:shortText\b[^>]*\bsktd:obligation="([^"]*)"/;
+
+/** `sktd:obligation` of the element's short text: 'optional' | 'forbidden' | 'mandatory' | ''. */
+function elementShortTextObligation(elementXml: string): string {
+  return elementXml.match(SHORT_TEXT_OBLIGATION_ATTR)?.[1] ?? '';
+}
+
+/** One short-text assignment: `node` is any reference `resolveKtdNode` accepts. */
+export interface KtdShortText {
+  node: string;
+  text: string;
+}
+
+/** Stated by the document's own `<sktd:instruction sktd:instructionId="shorttext">`. */
+export const KTD_SHORT_TEXT_MAX_LENGTH = 60;
+
+/**
+ * Apply a Markdown body (optional) and per-node short texts (optional) to a KTD envelope in
+ * one pass — the single entry point for SAPWrite. Every assignment is validated before any
+ * byte changes, so a refusal never leaves a half-applied document.
+ */
+export function rewriteKtdDocument(
+  envelopeXml: string,
+  markdown: string | undefined,
+  shortTexts: KtdShortText[] | undefined,
+): string {
+  const body = markdown === undefined ? '' : stripKtdMetaTrailer(markdown);
+  const assignments = shortTexts ?? [];
+  if (!body.trim() && assignments.length === 0) {
+    throw new Error(
+      'KTD documentation update has nothing to write: pass "source" (node bodies), "shortTexts", or both.',
+    );
+  }
+  let rewritten = body.trim() ? rewriteKtdText(envelopeXml, body) : envelopeXml;
+  if (assignments.length > 0) rewritten = applyKtdShortTexts(rewritten, assignments);
+  return rewritten;
+}
+
+/** Validate every assignment against the envelope, then splice them back to front. */
+function applyKtdShortTexts(envelopeXml: string, assignments: KtdShortText[]): string {
+  const elements = findKtdElements(envelopeXml);
+  const knownIds = elements.map((element) => element.id).filter(Boolean);
+  const resolved = new Map<string, { element: KtdElement; text: string }>();
+  for (const { node, text } of assignments) {
+    const element = resolveKtdNodeIn(envelopeXml, elements, node);
+    if (!element) throw unknownKtdNodeError([node], knownIds);
+    if (resolved.has(element.id)) {
+      throw new Error(`KTD node "${element.id}" appears twice in shortTexts — keep one entry per node.`);
+    }
+    const trimmed = text.trim();
+    if (trimmed.length > KTD_SHORT_TEXT_MAX_LENGTH) {
+      throw new Error(
+        `Short text for KTD node "${element.id}" is ${trimmed.length} characters; SAP allows ${KTD_SHORT_TEXT_MAX_LENGTH}.`,
+      );
+    }
+    if (!SHORT_TEXT_ATTR.test(element.xml)) {
+      throw new Error(
+        `KTD node "${element.id}" has no <sktd:shortText> element to write into; ARC-1 does not synthesize one.`,
+      );
+    }
+    if (elementShortTextObligation(element.xml) === 'forbidden') {
+      throw new Error(
+        `KTD node "${element.id}" does not take a short text (sktd:obligation="forbidden" — the object root and entity nodes describe themselves).`,
+      );
+    }
+    resolved.set(element.id, { element, text: trimmed });
+  }
+
+  let rewritten = envelopeXml;
+  for (const element of [...elements].reverse()) {
+    const hit = resolved.get(element.id);
+    if (!hit) continue;
+    rewritten =
+      rewritten.slice(0, element.start) + setKtdElementShortText(element.xml, hit.text) + rewritten.slice(element.end);
+  }
+  return rewritten;
+}
+
+/** Replace `sktd:shortText/@sktd:text` inside one element block with base64(text). */
+function setKtdElementShortText(elementXml: string, text: string): string {
+  const base64 = text ? Buffer.from(text, 'utf-8').toString('base64') : '';
+  return elementXml.replace(SHORT_TEXT_ATTR, (match) => match.replace(/sktd:text="[^"]*"/, `sktd:text="${base64}"`));
+}
+
 /** One `<sktd:element>` block located inside a `<sktd:docu>` envelope. */
 interface KtdElement {
   /** Value of `<sktd:id>`, or '' when the element carries none. */
@@ -801,7 +886,7 @@ function ktdNodeLabel(id: string, rootName: string): string {
  * through the Markdown body.
  */
 export function formatKtdShortTexts(envelopeXml: string): string {
-  const rootName = envelopeKtdName(envelopeXml);
+  const rootName = envelopeKtdObjectName(envelopeXml);
   const lines = findKtdElements(envelopeXml)
     .filter((element) => element.id)
     .map((element) => ({ label: ktdNodeLabel(element.id, rootName), text: elementShortText(element.xml) }))
@@ -839,8 +924,13 @@ function findKtdElements(envelopeXml: string): KtdElement[] {
   return elements;
 }
 
+/** `adtcore:name` of the `<sktd:docu>` envelope, or '' when the envelope carries none. */
+function envelopeKtdObjectName(envelopeXml: string): string {
+  return envelopeXml.match(/<sktd:docu\b[^>]*\badtcore:name="([^"]*)"/)?.[1] ?? '';
+}
+
 function envelopeKtdName(envelopeXml: string): string {
-  return envelopeXml.match(/<sktd:docu\b[^>]*\badtcore:name="([^"]*)"/)?.[1] ?? 'this KTD';
+  return envelopeKtdObjectName(envelopeXml) || 'this KTD';
 }
 
 function unknownKtdNodeError(ids: string[], knownIds: Iterable<string>): Error {
