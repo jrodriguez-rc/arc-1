@@ -1360,6 +1360,35 @@ describe('ddic-xml builders', () => {
           '</sktd:docu>';
         expect(formatKtdShortTexts(envelope)).toContain('  ZX [root]: line A line B');
       });
+
+      it('[root] means the actual document root; a non-root bare id (no #type=) is tagged [node]', () => {
+        const envelope =
+          '<sktd:docu xmlns:sktd="http://www.sap.com/wbobj/texts/sktd" adtcore:name="ZX">' +
+          `<sktd:element><sktd:id>ZX</sktd:id><sktd:text/><sktd:shortText sktd:text="${Buffer.from('Root text', 'utf-8').toString('base64')}" sktd:obligation="optional"/></sktd:element>` +
+          `<sktd:element><sktd:id>OTHER</sktd:id><sktd:text/><sktd:shortText sktd:text="${Buffer.from('Other text', 'utf-8').toString('base64')}" sktd:obligation="optional"/></sktd:element>` +
+          '</sktd:docu>';
+        const block = formatKtdShortTexts(envelope);
+        expect(block).toContain('  ZX [root]: Root text');
+        expect(block).toContain('  OTHER [node]: Other text');
+      });
+
+      it('formatKtdUndocumentedIndex names use the same "## <name>" addressing rule the short-texts header teaches (index round-trip)', () => {
+        const base = '/sap/bc/adt/bo/behaviordefinitions/zx/source/main';
+        const envelope =
+          '<sktd:docu xmlns:sktd="http://www.sap.com/wbobj/texts/sktd" adtcore:name="ZX">' +
+          `<sktd:element><sktd:id>ZX</sktd:id><sktd:text>${Buffer.from('Root docs.', 'utf-8').toString('base64')}</sktd:text></sktd:element>` +
+          `<sktd:element><sktd:id>${base}#type=BDEF/BAT;name=%25_OWN</sktd:id><sktd:text/></sktd:element>` +
+          '</sktd:docu>';
+
+        const index = formatKtdUndocumentedIndex(envelope);
+        const line = index.split('\n').find((l) => l.startsWith('BDEF/BAT'));
+        expect(line).toBeDefined();
+        const name = line?.slice(line.indexOf(': ') + 2) ?? '';
+        expect(name).toBe('%_OWN');
+
+        const rewritten = rewriteKtdText(envelope, `## ${name}\n\nnew body`);
+        expect(rewritten).toContain(`<sktd:text>${Buffer.from('new body', 'utf-8').toString('base64')}</sktd:text>`);
+      });
     });
   });
 });

@@ -645,9 +645,11 @@ export function decodeKtdText(envelopeXml: string): string {
  * Compact index of the nodes SAP pre-created in a KTD that nobody has documented yet —
  * exactly the elements `decodeKtdText` leaves out. Empty string when every node has text.
  *
- * Every id stays reconstructible without listing ~140-character URIs one per line: the
- * root id is the object name, and every other id is `<base>#type=<TYPE>;name=<NAME>` with
- * a single <base> per document, so names are grouped under their base and type.
+ * Lists names, not ~140-character URIs, one per line: the root is the object name, and
+ * every other node is grouped by <base> and <TYPE> and listed by its (percent-decoded)
+ * name — the same name `resolveKtdNodeIn` accepts under a "## <name>" heading, so this
+ * teaches the identical addressing rule as `formatKtdShortTexts`' header (both feed the
+ * same `## <name>` heading resolver in `rewriteKtdText`).
  */
 export function formatKtdUndocumentedIndex(envelopeXml: string): string {
   const ids = findKtdElements(envelopeXml)
@@ -672,7 +674,7 @@ export function formatKtdUndocumentedIndex(envelopeXml: string): string {
 
   const lines = [
     `Undocumented nodes: ${ids.length}. SAP pre-created them with empty text; document one by adding a ` +
-      '"## <id>" section, where <id> is the node name for the root and <base>#type=<TYPE>;name=<NAME> otherwise.',
+      '"## <name>" section using a name listed below.',
   ];
   for (const root of roots) lines.push(`root: ${root}`);
   for (const [base, byType] of namesByBaseAndType) {
@@ -783,11 +785,14 @@ function elementShortText(elementXml: string): string {
 /**
  * Trailer label for a node: the qualified, percent-decoded name first — the exact spelling
  * `resolveKtdNode` accepts, so it can be copied back as `shortTexts[].node` or a `## ` heading —
- * then the node type in brackets. The root node is its bare name.
+ * then a bracketed tag: `[root]` only for the actual document root (its id equals
+ * `rootName`, from `envelopeKtdName`), `[<TYPE>]` for a typed fragment id, and `[node]` for
+ * any other bare id (a non-root element without a `#type=` fragment).
  */
-function ktdNodeLabel(id: string): string {
+function ktdNodeLabel(id: string, rootName: string): string {
   const type = ktdNodeType(id);
-  return type ? `${ktdNodeQualifiedName(id)} [${type}]` : `${id} [root]`;
+  if (type) return `${ktdNodeQualifiedName(id)} [${type}]`;
+  return `${id} [${id.toUpperCase() === rootName.toUpperCase() ? 'root' : 'node'}]`;
 }
 
 /**
@@ -796,9 +801,10 @@ function ktdNodeLabel(id: string): string {
  * through the Markdown body.
  */
 export function formatKtdShortTexts(envelopeXml: string): string {
+  const rootName = envelopeKtdName(envelopeXml);
   const lines = findKtdElements(envelopeXml)
     .filter((element) => element.id)
-    .map((element) => ({ label: ktdNodeLabel(element.id), text: elementShortText(element.xml) }))
+    .map((element) => ({ label: ktdNodeLabel(element.id, rootName), text: elementShortText(element.xml) }))
     .filter((entry) => entry.text)
     .map((entry) => `  ${entry.label}: ${entry.text.replace(/\s+/g, ' ').trim()}`);
   if (lines.length === 0) return '';

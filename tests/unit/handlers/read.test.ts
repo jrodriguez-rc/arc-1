@@ -620,6 +620,28 @@ describe('SAPRead handler', () => {
       expect(stripKtdMetaTrailer(text)).toBe('');
     });
 
+    it('a fully-documented KTD with one short text has no undocumented-index block and no trailing blank line', async () => {
+      mockFetch.mockReset();
+      const shortText = Buffer.from('Finalize step', 'utf-8').toString('base64');
+      const envelope =
+        '<sktd:docu xmlns:sktd="http://www.sap.com/wbobj/texts/sktd" adtcore:name="ZBDEF">' +
+        `<sktd:element><sktd:id>ZBDEF</sktd:id><sktd:text>${Buffer.from('Root docs.', 'utf-8').toString('base64')}</sktd:text><sktd:shortText sktd:text="" sktd:obligation="forbidden"/></sktd:element>` +
+        `<sktd:element><sktd:id>/sap/bc/adt/bo/behaviordefinitions/zbdef/source/main#type=BDEF/BSO;name=ZBDEF.finalize</sktd:id><sktd:text>${Buffer.from('Saver docs.', 'utf-8').toString('base64')}</sktd:text><sktd:shortText sktd:text="${shortText}" sktd:obligation="optional"/></sktd:element>` +
+        '</sktd:docu>';
+      mockFetch.mockResolvedValueOnce(mockResponse(200, envelope, { 'x-csrf-token': 'T' }));
+
+      const result = await handleToolCall(createClient(), DEFAULT_CONFIG, 'SAPRead', { type: 'SKTD', name: 'ZBDEF' });
+
+      const text = result.content[0]?.text ?? '';
+      const marker = text.indexOf(KTD_META_MARKER);
+      expect(marker).toBeGreaterThan(0);
+      expect(text.slice(marker)).toBe(
+        `${KTD_META_MARKER}\nShort texts (SAPWrite shortTexts=[{node,text}]; node = the name before " ["):\n  ZBDEF.finalize [BDEF/BSO]: Finalize step`,
+      );
+      expect(text).not.toContain('Undocumented nodes');
+      expect(text.endsWith('\n')).toBe(false);
+    });
+
     it('greps the decoded Markdown only — the undocumented-node index is not searched', async () => {
       mockFetch.mockReset();
       const envelope =
