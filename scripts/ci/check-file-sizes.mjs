@@ -59,6 +59,10 @@ const BUDGETS = {
   // it passed the 3000-line default test budget with the ATC check-variant binding cases
   // (docs/research/2026-08-19-atc-default-check-variant.md). Split by domain before raising again.
   'tests/integration/adt.integration.test.ts': 3100,
+  // The DDIC/SKTD write handler suite crossed the default with the KTD short-text handler cases
+  // (schema gates, partial-success create, neither-source-nor-shortTexts). The SKTD block is the
+  // natural split (tests/unit/handlers/write-ktd.test.ts) — do that before raising again.
+  'tests/unit/handlers/write-ddic.test.ts': 3100,
 };
 
 const DEFAULT_SRC = 1500;

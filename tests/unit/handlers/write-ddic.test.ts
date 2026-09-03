@@ -626,6 +626,42 @@ describe('SAPWrite handler — DDIC writes', () => {
       expect(calls.some((c) => c.method === 'PUT')).toBe(false);
     });
 
+    it('SKTD update with neither source nor shortTexts is refused before any lock, naming both parameters', async () => {
+      mockFetch.mockReset();
+      const calls: Array<{ method: string; url: string }> = [];
+      const current =
+        '<sktd:docu xmlns:sktd="http://www.sap.com/wbobj/texts/sktd" adtcore:name="ZTR_C_PAYMENT_VALUE_DATE">' +
+        `<sktd:element><sktd:id>${KTD_ROOT_ID}</sktd:id><sktd:text/></sktd:element>` +
+        '</sktd:docu>';
+      mockFetch.mockImplementation((url: string | URL, opts?: { method?: string }) => {
+        calls.push({ method: opts?.method ?? 'GET', url: String(url) });
+        return Promise.resolve(mockResponse(200, current, { 'x-csrf-token': 'T' }));
+      });
+
+      for (const extra of [{}, { shortTexts: [] }]) {
+        const result = await handleToolCall(createClient(), DEFAULT_CONFIG, 'SAPWrite', {
+          action: 'update',
+          type: 'SKTD',
+          name: KTD_ROOT_ID,
+          ...extra,
+        });
+        expect(result.isError).toBe(true);
+        expect(result.content[0]?.text).toMatch(/nothing to write[\s\S]*"source"[\s\S]*"shortTexts"/);
+      }
+      expect(calls.some((c) => c.url.includes('_action=LOCK') || c.method === 'PUT')).toBe(false);
+    });
+
+    it('rejects shortTexts with an action other than update/create at the schema', async () => {
+      const result = await handleToolCall(createClient(), DEFAULT_CONFIG, 'SAPWrite', {
+        action: 'delete',
+        type: 'SKTD',
+        name: KTD_ROOT_ID,
+        shortTexts: [{ node: 'PaymentValueDate', text: 'x' }],
+      });
+      expect(result.isError).toBe(true);
+      expect(result.content[0]?.text).toContain('action="update" or action="create"');
+    });
+
     it('activates SKTD using the lowercased ADT URL in the objectReference', async () => {
       mockFetch.mockReset();
       const calls: Array<{ method: string; url: string; body?: string }> = [];
@@ -731,6 +767,9 @@ describe('SAPWrite handler — DDIC writes', () => {
       expect(text).toContain('Created SKTD ZTR_C_PAYMENT_VALUE_DATE');
       expect(text).toContain('does not exist');
       expect(text).toContain('action="update"');
+      // The retry hint names exactly what the caller sent: source, and no shortTexts.
+      expect(text).toContain('source=…)');
+      expect(text).not.toContain('shortTexts=');
       // The collection URL carries sap-client/sap-language, so match the path, not the suffix.
       const postCall = calls.find((c) => c.method === 'POST' && c.url.includes('/documentation/ktd/documents'));
       expect(postCall).toBeDefined();

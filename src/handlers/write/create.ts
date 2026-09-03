@@ -600,37 +600,34 @@ export async function writeActionCreate(ctx: SapWriteContext): Promise<ToolResul
       throw err;
     }
 
-    // If initial Markdown was provided, follow up with an update PUT to write it.
-    // Same envelope contract as the update path: fetch-then-rewrite ensures we
-    // PUT back exactly the shape SAP gave us (with all the server-assigned
-    // metadata), only swapping <sktd:text>.
+    // Anything to write (node bodies and/or short texts) goes in a follow-up PUT of the
+    // envelope SAP just created; fetch-then-rewrite keeps every server-assigned byte (why:
+    // the SKTD banner in src/adt/ddic-xml.ts). The POST above already succeeded, so the KTD
+    // exists: any failure from here on is a partial success and says so — a message about
+    // the documentation alone invites the same create again, which 409s.
     const shortTexts = args.shortTexts as KtdShortText[] | undefined;
     if (hasSource || shortTexts?.length) {
-      const { source: currentEnvelope } = await client.getKtd(name);
-      let body: string;
       try {
-        body = rewriteKtdDocument(currentEnvelope, hasSource ? source : undefined, shortTexts);
+        const { source: currentEnvelope } = await client.getKtd(name);
+        const body = rewriteKtdDocument(currentEnvelope, hasSource ? source : undefined, shortTexts);
+        await safeUpdateObject(
+          client.http,
+          client.safety,
+          objectUrl,
+          body,
+          SKTD_V2_CONTENT_TYPE,
+          effectiveTransport,
+          getCachedFeatures()?.abapRelease,
+        );
       } catch (err) {
-        // The POST above already succeeded, so the KTD exists (empty). Say so — a
-        // message about the Markdown alone invites the same create again, which 409s.
         invalidateWrittenObject(type, name);
+        const retryArgs = [hasSource && 'source=…', shortTexts?.length && 'shortTexts=[…]'].filter(Boolean).join(', ');
         return errorResult(
           `Created SKTD ${name} in package ${pkg}, but the documentation was NOT written: ` +
             `${err instanceof Error ? err.message : String(err)}\n` +
-            `The object exists — retry with SAPWrite(action="update", type="SKTD", name="${name}", ` +
-            `${hasSource ? 'source=…' : ''}${hasSource && shortTexts?.length ? ', ' : ''}` +
-            `${shortTexts?.length ? 'shortTexts=[…]' : ''}).`,
+            `The object exists — retry with SAPWrite(action="update", type="SKTD", name="${name}", ${retryArgs}).`,
         );
       }
-      await safeUpdateObject(
-        client.http,
-        client.safety,
-        objectUrl,
-        body,
-        SKTD_V2_CONTENT_TYPE,
-        effectiveTransport,
-        getCachedFeatures()?.abapRelease,
-      );
       invalidateWrittenObject(type, name);
       return textResult(
         `Created SKTD ${name} in package ${pkg} and wrote its documentation.\nNext step: SAPActivate(type="SKTD", name="${name}").\n${ktdResult}`,
@@ -638,7 +635,7 @@ export async function writeActionCreate(ctx: SapWriteContext): Promise<ToolResul
     }
     invalidateWrittenObject();
     return textResult(
-      `Created SKTD ${name} in package ${pkg} (no Markdown content written — pass "source" to write the body).\nNext step: SAPActivate(type="SKTD", name="${name}").\n${ktdResult}`,
+      `Created SKTD ${name} in package ${pkg} (nothing written yet — pass "source" for node bodies and/or "shortTexts" for per-node short texts).\nNext step: SAPActivate(type="SKTD", name="${name}").\n${ktdResult}`,
     );
   }
 

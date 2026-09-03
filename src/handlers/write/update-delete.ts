@@ -108,12 +108,9 @@ export async function writeActionUpdate(ctx: SapWriteContext): Promise<ToolResul
   }
 
   if (type === 'SKTD') {
-    // KTD update requires the full <sktd:docu> XML envelope with the Markdown
-    // body base64-encoded inside <sktd:text>, PUT with
-    // `application/vnd.sap.adt.sktdv2+xml`. PUTting raw text/plain silently
-    // no-ops (or 415s on strict systems). Fetch the current envelope,
-    // replace only the <sktd:text> body, and PUT it back — preserves
-    // responsible/masterLanguage/packageRef/refObject metadata.
+    // Fetch-modify-PUT of the full <sktd:docu> envelope as `application/vnd.sap.adt.sktdv2+xml`
+    // (why: the SKTD banner in src/adt/ddic-xml.ts): the addressed node bodies and short texts
+    // are swapped in place, every other byte is preserved.
     //
     // Deliberately no `version`: ADT's default view already carries the pending
     // inactive draft, so consecutive node writes without an activation in between

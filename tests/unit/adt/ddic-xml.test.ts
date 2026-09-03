@@ -960,11 +960,12 @@ describe('ddic-xml builders', () => {
         expect(() => rewriteKtdText(envelope, 'just some text')).toThrow(/addresses no node/i);
       });
 
-      it('names the unknown node and lists the valid ids when a heading does not match', () => {
+      it('names the unknown node and lists the known ones compactly (names grouped by base and type, not raw ids)', () => {
         const envelope = buildMultiEnvelope({ [ROOT_ID]: 'root', [BAT_ID]: 'bat' });
         expect(() => rewriteKtdText(envelope, `## ${BAF_ID}\n\nbody`)).toThrow(
-          /ReadTravelSummary[\s\S]*does not exist[\s\S]*Known node ids:[\s\S]*I_TRAVELTP/i,
+          /ReadTravelSummary[\s\S]*does not exist[\s\S]*Known nodes[\s\S]*root: ZI_TRAVELTP\n[\s\S]*BDEF\/BAT \(1\): %_OWN/,
         );
+        expect(() => rewriteKtdText(envelope, `## ${BAF_ID}\n\nbody`)).not.toThrow(/name=%25_OWN/);
       });
 
       it('still writes the single-element body with no heading (back-compat)', () => {
@@ -1072,6 +1073,22 @@ describe('ddic-xml builders', () => {
         expect(decodeKtdText(rewritten)).toBe(`## ${ROOT_ID}\n\nnew root\n\n## ${BAT_ID}\n\nnew bat`);
       });
 
+      it('refuses a "## <node>" section pasted below the SAPRead trailer instead of silently dropping it', () => {
+        // The trailer's own text says "add a ## <name> section", and the end of the pasted read is where one lands.
+        const envelope = buildMultiEnvelope({ [ROOT_ID]: 'root', [BAT_ID]: 'bat' });
+        const appended = `## ${ROOT_ID}\n\nroot\n\n${KTD_META_MARKER}\nUndocumented nodes: 1.\n\n## ${BAF_ID}\n\nnew docs`;
+        expect(() => rewriteKtdText(envelope, appended)).toThrow(/below the read-only SAPRead trailer/);
+        expect(() => stripKtdMetaTrailer(`${KTD_META_MARKER}\n## anything`)).toThrow(/"## anything" section below/);
+      });
+
+      it('a pathological heading line costs linear time (the lazy heading regex was quadratic in the line length)', () => {
+        const envelope = buildMultiEnvelope({ [ROOT_ID]: 'r', [BAT_ID]: 'b' });
+        const body = `## ${ROOT_ID}\n\n## x${' '.repeat(200_000)}y\n\ntext`;
+        const started = performance.now();
+        expect(decodeKtdText(rewriteKtdText(envelope, body))).toContain('## x');
+        expect(performance.now() - started).toBeLessThan(1000);
+      });
+
       it('stripKtdMetaTrailer cuts at the marker line and trims, leaving other text alone', () => {
         expect(stripKtdMetaTrailer(`body\n\n${KTD_META_MARKER}\nanything`)).toBe('body');
         expect(stripKtdMetaTrailer('body with no trailer')).toBe('body with no trailer');
@@ -1092,6 +1109,17 @@ describe('ddic-xml builders', () => {
       it('stripKtdMetaTrailer keeps the body bytes: CRLF input stays CRLF, nothing is re-joined', () => {
         expect(stripKtdMetaTrailer(`line1\r\nline2\r\n\r\n${KTD_META_MARKER}\r\nanything`)).toBe('line1\r\nline2');
         expect(stripKtdMetaTrailer('line1\r\nline2\r\n')).toBe('line1\r\nline2\r\n');
+      });
+
+      it('CRLF bodies: headings resolve and addressed bodies are stored LF-normalized; a single-node body keeps its bytes', () => {
+        const envelope = buildMultiEnvelope({ [ROOT_ID]: 'r', [BAT_ID]: 'b' });
+        const multi = rewriteKtdText(
+          envelope,
+          `## ${ROOT_ID}\r\n\r\nline1\r\nline2\r\n\r\n## ${BAT_ID}\r\n\r\nbat1\r\nbat2`,
+        );
+        expect(decodeKtdText(multi)).toBe(`## ${ROOT_ID}\n\nline1\nline2\n\n## ${BAT_ID}\n\nbat1\nbat2`);
+        const single = rewriteKtdText(buildMultiEnvelope({ [ROOT_ID]: 'r' }), 'line1\r\nline2');
+        expect(decodeKtdText(single)).toBe('line1\r\nline2');
       });
 
       it('resolveKtdNode: exact id, case-insensitive id, unique short name (percent-decoded); unknown is undefined', () => {
@@ -1161,14 +1189,44 @@ describe('ddic-xml builders', () => {
         expect(() => resolveKtdNode(envelope, 'update')).toThrow(/ambiguous in "ZI_TRAVELTP"/);
       });
 
-      it('headings accept a unique short name and still refuse an unknown ADT-shaped id', () => {
-        const envelope = buildMultiEnvelope({ [ROOT_ID]: 'r', [BAT_ID]: 'b' });
-        const rewritten = rewriteKtdText(envelope, '## %_OWN\n\nbat by short name');
-        expect(rewritten).toContain(`<sktd:id>${BAT_ID}</sktd:id><sktd:text>${b64('bat by short name')}</sktd:text>`);
-        expect(() => rewriteKtdText(envelope, `## ${BAF_ID}\n\nx`)).toThrow(/does not exist/);
-        // Prose stays prose: no node is named like this, so it is body content of the root.
-        const prose = rewriteKtdText(envelope, `## ${ROOT_ID}\n\n## /notes/package layout\n\ntext`);
-        expect(decodeKtdText(prose)).toContain('## /notes/package layout');
+      it('headings resolve qualified names, never bare ones, and refuse a typo in a qualified name', () => {
+        const UPDATE_ID =
+          '/sap/bc/adt/bo/behaviordefinitions/zi_traveltp/source/main#type=BDEF/BSO;name=ZI_TravelTP.update';
+        const envelope = buildMultiEnvelope({ [ROOT_ID]: 'r', [BAT_ID]: 'b', [BAF_ID]: 'f', [UPDATE_ID]: 'u' });
+        // The trailer's own spelling — qualified, percent-decoded — addresses the node.
+        const byName = rewriteKtdText(
+          envelope,
+          '## ZI_TravelTP.ReadTravelSummary\n\nby qualified name\n\n## %_OWN\n\nbat',
+        );
+        expect(decodeKtdText(byName)).toContain(`## ${BAF_ID}\n\nby qualified name`);
+        expect(decodeKtdText(byName)).toContain(`## ${BAT_ID}\n\nbat`);
+        // A bare name is prose in a heading (every BDEF carries <Entity>.update), even though
+        // shortTexts[].node accepts the same bare name.
+        const prose = rewriteKtdText(
+          envelope,
+          `## ${ROOT_ID}\n\nIntro.\n\n## Update\n\nHow updates work.\n\n## ReadTravelSummary\n\nprose too`,
+        );
+        expect(decodeKtdText(prose)).toContain(
+          `## ${ROOT_ID}\n\nIntro.\n\n## Update\n\nHow updates work.\n\n## ReadTravelSummary\n\nprose too`,
+        );
+        expect(decodeKtdText(prose)).toContain(`## ${UPDATE_ID}\n\nu`);
+        expect(resolveKtdNode(envelope, 'ReadTravelSummary')?.id).toBe(BAF_ID);
+        // A typo in a qualified name is unmistakably a node reference: refused, never folded into the previous node.
+        expect(() => rewriteKtdText(envelope, `## ${ROOT_ID}\n\nx\n\n## ZI_TravelTP.ReadTravelSummaries\n\ny`)).toThrow(
+          /ReadTravelSummaries[\s\S]*does not exist/,
+        );
+        expect(() => rewriteKtdText(envelope, `## ${BAF_ID}x\n\nx`)).toThrow(/does not exist/);
+        // Prose stays prose: a dot with no known qualifier, or a path no node is named like.
+        const notes = rewriteKtdText(envelope, `## ${ROOT_ID}\n\n## e.g. notes\n\n## /notes/package layout\n\ntext`);
+        expect(decodeKtdText(notes)).toContain('## e.g. notes\n\n## /notes/package layout');
+      });
+
+      it('rewrites the lone <sktd:text> of an envelope that has no <sktd:element> at all', () => {
+        const bare =
+          '<sktd:docu xmlns:sktd="http://www.sap.com/wbobj/texts/sktd"><sktd:text>b2xk</sktd:text></sktd:docu>';
+        expect(rewriteKtdText(bare, 'new')).toBe(
+          `<sktd:docu xmlns:sktd="http://www.sap.com/wbobj/texts/sktd"><sktd:text>${b64('new')}</sktd:text></sktd:docu>`,
+        );
       });
 
       it('Markdown body is encoded, not interpolated as raw text (prevents XML injection via user input)', () => {
@@ -1335,19 +1393,45 @@ describe('ddic-xml builders', () => {
         expect(formatKtdShortTexts(missing)).toBe('');
       });
 
-      it('every rendered short-text label copies back as a node reference that resolves to its element, including a bracket-less root', () => {
+      it('trailer names round-trip on a BDEF whose root entity is named like the object: the entity gets its full id', () => {
+        // Every BDEF has a BDEF/BAE node for its root entity, named like the object in mixed case,
+        // while the root <sktd:id> is the upper-cased object name. That name resolves to the ROOT
+        // (case-insensitive id beats the name match), so printing it for the entity would make the
+        // index's own instruction overwrite the root documentation.
+        const BAE_ID = '/sap/bc/adt/bo/behaviordefinitions/zi_traveltp/source/main#type=BDEF/BAE;name=ZI_TravelTP';
+        const b64 = (text: string) => Buffer.from(text, 'utf-8').toString('base64');
+        const envelope =
+          '<sktd:docu xmlns:sktd="http://www.sap.com/wbobj/texts/sktd" adtcore:name="ZI_TRAVELTP">' +
+          `<sktd:element><sktd:id>ZI_TRAVELTP</sktd:id><sktd:text>${b64('root docs')}</sktd:text></sktd:element>` +
+          `<sktd:element><sktd:id>${BAE_ID}</sktd:id><sktd:text/><sktd:shortText sktd:text="${b64('Travel root entity')}" sktd:obligation="optional"/></sktd:element>` +
+          '</sktd:docu>';
+        const index = formatKtdUndocumentedIndex(envelope);
+        expect(index).toContain(`BDEF/BAE (1): ${BAE_ID}`);
+        expect(index).not.toMatch(/BDEF\/BAE \(1\): ZI_TravelTP$/m);
+        expect(formatKtdShortTexts(envelope)).toContain(`  ${BAE_ID} [BDEF/BAE]: Travel root entity`);
+        // Following the index writes the entity, not the root.
+        const rewritten = rewriteKtdText(envelope, `## ${BAE_ID}\n\nentity docs`);
+        expect(decodeKtdText(rewritten)).toBe(`## ZI_TRAVELTP\n\nroot docs\n\n## ${BAE_ID}\n\nentity docs`);
+        // And the bare object name keeps meaning the root, as before.
+        expect(resolveKtdNode(envelope, 'ZI_TravelTP')?.id).toBe('ZI_TRAVELTP');
+      });
+
+      it('every rendered short-text label copies back as a node reference that resolves to the element it was printed for, including a bracket-less root', () => {
         const rootWithShortText =
           '<sktd:docu xmlns:sktd="http://www.sap.com/wbobj/texts/sktd" adtcore:name="ZX">' +
           `<sktd:element><sktd:id>ZX</sktd:id><sktd:text/><sktd:shortText sktd:text="${Buffer.from('Root short text', 'utf-8').toString('base64')}" sktd:obligation="optional"/></sktd:element>` +
           '</sktd:docu>';
 
-        for (const envelope of [liveEnvelope, rootWithShortText]) {
+        for (const [envelope, expectedIds] of [
+          [liveEnvelope, [FINALIZE_ID]],
+          [rootWithShortText, ['ZX']],
+        ] as Array<[string, string[]]>) {
           const lines = formatKtdShortTexts(envelope).split('\n').slice(1); // skip the header
-          expect(lines.length).toBeGreaterThan(0);
-          for (const line of lines) {
+          expect(lines.length).toBe(expectedIds.length);
+          lines.forEach((line, index) => {
             const ref = line.trim().split(' [')[0];
-            expect(resolveKtdNode(envelope, ref)?.id, line).toBeDefined();
-          }
+            expect(resolveKtdNode(envelope, ref)?.id, line).toBe(expectedIds[index]);
+          });
         }
 
         expect(formatKtdShortTexts(rootWithShortText)).toContain('  ZX [root]: Root short text');
@@ -1449,6 +1533,22 @@ describe('ddic-xml builders', () => {
           ]),
         ).toThrow(/twice/);
         expect(() => rewriteKtdDocument(liveEnvelope, undefined, undefined)).toThrow(/nothing to write/i);
+      });
+
+      it('rewriteKtdDocument accepts exactly 60 UTF-16 units, counting a non-BMP character as two, after collapsing whitespace', () => {
+        const sixty = 'x'.repeat(60);
+        expect(rewriteKtdDocument(liveEnvelope, undefined, [{ node: 'finalize', text: sixty }])).toContain(
+          `sktd:text="${Buffer.from(sixty, 'utf-8').toString('base64')}"`,
+        );
+        // 30 code points but 60 UTF-16 units — SAP accepted this live; 31 is refused before any lock.
+        const emoji = '😀'.repeat(30);
+        expect(() => rewriteKtdDocument(liveEnvelope, undefined, [{ node: 'finalize', text: emoji }])).not.toThrow();
+        expect(() => rewriteKtdDocument(liveEnvelope, undefined, [{ node: 'finalize', text: `${emoji}😀` }])).toThrow(
+          /62 characters/,
+        );
+        // Internal whitespace collapses to one space before counting, so this is 61 → 60.
+        const padded = `${'x'.repeat(30)}  ${'x'.repeat(29)}`;
+        expect(() => rewriteKtdDocument(liveEnvelope, undefined, [{ node: 'finalize', text: padded }])).not.toThrow();
       });
 
       it('rewriteKtdDocument treats an explicit empty/whitespace body as a refusal, not "nothing to write" — even with shortTexts present', () => {
