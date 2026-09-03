@@ -663,7 +663,7 @@ export function formatKtdUndocumentedIndex(envelopeXml: string): string {
       roots.push(id);
       continue;
     }
-    const base = id.slice(0, id.indexOf('#type='));
+    const base = ktdNodeBase(id);
     const nodeName = ktdNodeQualifiedName(id);
     const byType = namesByBaseAndType.get(base) ?? new Map<string, string[]>();
     byType.set(type, [...(byType.get(type) ?? []), nodeName]);
@@ -787,7 +787,7 @@ function elementShortText(elementXml: string): string {
  */
 function ktdNodeLabel(id: string): string {
   const type = ktdNodeType(id);
-  return type ? `${ktdNodeQualifiedName(id)} [${type}]` : id;
+  return type ? `${ktdNodeQualifiedName(id)} [${type}]` : `${id} [root]`;
 }
 
 /**
@@ -802,7 +802,7 @@ export function formatKtdShortTexts(envelopeXml: string): string {
     .filter((entry) => entry.text)
     .map((entry) => `  ${entry.label}: ${entry.text.replace(/\s+/g, ' ').trim()}`);
   if (lines.length === 0) return '';
-  return ['Short texts (SAPWrite shortTexts=[{node,text}]; node = the name before the brackets):', ...lines].join('\n');
+  return ['Short texts (SAPWrite shortTexts=[{node,text}]; node = the name before " ["):', ...lines].join('\n');
 }
 
 /**
@@ -865,6 +865,12 @@ function ktdNodeType(id: string): string {
   const typeAt = id.indexOf('#type=');
   const nameAt = typeAt < 0 ? -1 : id.indexOf(';name=', typeAt);
   return typeAt < 0 || nameAt < 0 ? '' : id.slice(typeAt + '#type='.length, nameAt);
+}
+
+/** Everything before `#type=` in a fragment id, '' for the root node. */
+function ktdNodeBase(id: string): string {
+  const at = id.indexOf('#type=');
+  return at < 0 ? '' : id.slice(0, at);
 }
 
 /** Last dot-segment of a (qualified) node name: `ZI_TravelTP.GetPhoto` → `GetPhoto`. */

@@ -1309,9 +1309,7 @@ describe('ddic-xml builders', () => {
 
       it('formatKtdShortTexts lists nodes that have a short text as "<qualified name> [<TYPE>]: <text>"', () => {
         const block = formatKtdShortTexts(liveEnvelope);
-        expect(block).toContain(
-          'Short texts (SAPWrite shortTexts=[{node,text}]; node = the name before the brackets):',
-        );
+        expect(block).toContain('Short texts (SAPWrite shortTexts=[{node,text}]; node = the name before " ["):');
         expect(block).toContain('  ZI_TRAVELTP.finalize [BDEF/BSO]: Saver: FINALIZE — last determinations before save');
         // The undocumented sibling has an empty short text and is not listed.
         expect(block).not.toContain('ReadTravelSummaryHTML');
@@ -1336,13 +1334,22 @@ describe('ddic-xml builders', () => {
         expect(formatKtdShortTexts(missing)).toBe('');
       });
 
-      it('a rendered short-text label copies back as a node reference that resolves to its element', () => {
-        const line = formatKtdShortTexts(liveEnvelope)
-          .split('\n')
-          .find((l) => l.includes('finalize'));
-        const ref = line?.trim().split(' [')[0] ?? '';
-        expect(ref).toBe('ZI_TRAVELTP.finalize');
-        expect(resolveKtdNode(liveEnvelope, ref)?.id).toBe(FINALIZE_ID);
+      it('every rendered short-text label copies back as a node reference that resolves to its element, including a bracket-less root', () => {
+        const rootWithShortText =
+          '<sktd:docu xmlns:sktd="http://www.sap.com/wbobj/texts/sktd" adtcore:name="ZX">' +
+          `<sktd:element><sktd:id>ZX</sktd:id><sktd:text/><sktd:shortText sktd:text="${Buffer.from('Root short text', 'utf-8').toString('base64')}" sktd:obligation="optional"/></sktd:element>` +
+          '</sktd:docu>';
+
+        for (const envelope of [liveEnvelope, rootWithShortText]) {
+          const lines = formatKtdShortTexts(envelope).split('\n').slice(1); // skip the header
+          expect(lines.length).toBeGreaterThan(0);
+          for (const line of lines) {
+            const ref = line.trim().split(' [')[0];
+            expect(resolveKtdNode(envelope, ref)?.id, line).toBeDefined();
+          }
+        }
+
+        expect(formatKtdShortTexts(rootWithShortText)).toContain('  ZX [root]: Root short text');
       });
 
       it('formatKtdShortTexts collapses a multi-line short text onto one line', () => {
@@ -1351,7 +1358,7 @@ describe('ddic-xml builders', () => {
           '<sktd:docu xmlns:sktd="http://www.sap.com/wbobj/texts/sktd" adtcore:name="ZX">' +
           `<sktd:element><sktd:id>ZX</sktd:id><sktd:text/><sktd:shortText sktd:text="${multiline}" sktd:obligation="optional"/></sktd:element>` +
           '</sktd:docu>';
-        expect(formatKtdShortTexts(envelope)).toContain('  ZX: line A line B');
+        expect(formatKtdShortTexts(envelope)).toContain('  ZX [root]: line A line B');
       });
     });
   });

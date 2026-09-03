@@ -17,7 +17,7 @@ import { AdtClient, createClient, mockFetch } from './setup-undici-mock.js';
 
 const { handleToolCall } = await import('../../../src/handlers/dispatch.js');
 const { resetCachedFeatures, setCachedFeatures } = await import('../../../src/handlers/feature-cache.js');
-const { stripKtdMetaTrailer } = await import('../../../src/adt/ddic-xml.js');
+const { KTD_META_MARKER, stripKtdMetaTrailer } = await import('../../../src/adt/ddic-xml.js');
 
 describe('SAPRead handler', () => {
   beforeEach(() => {
@@ -574,10 +574,50 @@ describe('SAPRead handler', () => {
       expect(text).not.toContain('<sktd:');
       expect(text).toContain('<!-- arc1:ktd-meta');
       expect(text).not.toContain('\n---\n');
-      // The trailer starts on its own line right after the body.
-      expect(text.indexOf('<!-- arc1:ktd-meta')).toBeGreaterThan(text.indexOf('Root docs.'));
+      expect(text).toContain(`Root docs.\n\n${KTD_META_MARKER}\nUndocumented nodes: 2`);
       // Producer/consumer contract: what SAPRead emits is exactly what the writer strips.
       expect(stripKtdMetaTrailer(text)).toBe('Root docs.');
+    });
+
+    it('lists node short texts in the KTD metadata trailer, not in the body', async () => {
+      mockFetch.mockReset();
+      const shortText = Buffer.from('Finalize step', 'utf-8').toString('base64');
+      const envelope =
+        '<sktd:docu xmlns:sktd="http://www.sap.com/wbobj/texts/sktd" adtcore:name="ZBDEF">' +
+        `<sktd:element><sktd:id>ZBDEF</sktd:id><sktd:text>${Buffer.from('Root docs.', 'utf-8').toString('base64')}</sktd:text><sktd:shortText sktd:text="" sktd:obligation="forbidden"/></sktd:element>` +
+        `<sktd:element><sktd:id>/sap/bc/adt/bo/behaviordefinitions/zbdef/source/main#type=BDEF/BSO;name=ZBDEF.finalize</sktd:id><sktd:text>${Buffer.from('Saver docs.', 'utf-8').toString('base64')}</sktd:text><sktd:shortText sktd:text="${shortText}" sktd:obligation="optional"/></sktd:element>` +
+        `<sktd:element><sktd:id>/sap/bc/adt/bo/behaviordefinitions/zbdef/source/main#type=BDEF/BAF;name=ZBDEF.GetPhoto</sktd:id><sktd:text/><sktd:shortText sktd:text="" sktd:obligation="optional"/></sktd:element>` +
+        '</sktd:docu>';
+      mockFetch.mockResolvedValueOnce(mockResponse(200, envelope, { 'x-csrf-token': 'T' }));
+
+      const result = await handleToolCall(createClient(), DEFAULT_CONFIG, 'SAPRead', { type: 'SKTD', name: 'ZBDEF' });
+
+      const text = result.content[0]?.text ?? '';
+      const marker = text.indexOf(KTD_META_MARKER);
+      expect(marker).toBeGreaterThan(0);
+      expect(text.slice(0, marker)).not.toContain('Finalize step');
+      expect(text.slice(marker)).toContain('  ZBDEF.finalize [BDEF/BSO]: Finalize step');
+      // Two labelled blocks, separated by a blank line: short texts first, then the undocumented index.
+      expect(text.slice(marker)).toMatch(
+        /Short texts \([^\n]*\):\n {2}ZBDEF\.finalize \[BDEF\/BSO\]: Finalize step\n\nUndocumented nodes: 1\./,
+      );
+    });
+
+    it('a KTD with nothing documented reads as marker-first trailer only, which the writer reduces to an empty body', async () => {
+      mockFetch.mockReset();
+      const envelope =
+        '<sktd:docu xmlns:sktd="http://www.sap.com/wbobj/texts/sktd" adtcore:name="ZBDEF">' +
+        '<sktd:element><sktd:id>ZBDEF</sktd:id><sktd:text/><sktd:shortText sktd:text="" sktd:obligation="forbidden"/></sktd:element>' +
+        '<sktd:element><sktd:id>/sap/bc/adt/bo/behaviordefinitions/zbdef/source/main#type=BDEF/BAF;name=ZBDEF.GetPhoto</sktd:id><sktd:text/><sktd:shortText sktd:text="" sktd:obligation="optional"/></sktd:element>' +
+        '</sktd:docu>';
+      mockFetch.mockResolvedValueOnce(mockResponse(200, envelope, { 'x-csrf-token': 'T' }));
+
+      const result = await handleToolCall(createClient(), DEFAULT_CONFIG, 'SAPRead', { type: 'SKTD', name: 'ZBDEF' });
+
+      const text = result.content[0]?.text ?? '';
+      expect(text.startsWith(KTD_META_MARKER)).toBe(true);
+      expect(text).toContain('Undocumented nodes: 2');
+      expect(stripKtdMetaTrailer(text)).toBe('');
     });
 
     it('greps the decoded Markdown only — the undocumented-node index is not searched', async () => {
