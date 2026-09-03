@@ -852,7 +852,7 @@ export function getToolDefinitions(
           shortTexts: {
             type: 'array',
             description:
-              'SKTD/KTD update/create: per-node short texts (max 60 chars; "" clears). node = full node id or a unique node name (e.g. "GetPhoto"). May be used without "source".',
+              'SKTD/KTD update/create: per-node short texts (max 60 chars; "" clears). node = full node id, or the name SAPRead\'s trailer lists before " [" (e.g. "GetPhoto"). Works without "source".',
             items: {
               type: 'object',
               properties: {

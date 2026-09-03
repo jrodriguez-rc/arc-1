@@ -398,7 +398,7 @@ function validateSapWriteInput(
   }
 
   if (input.shortTexts !== undefined && input.shortTexts.length > 0) {
-    const type = (input.type ?? '').toUpperCase();
+    const type = input.type ?? '';
     if (type !== 'SKTD' && type !== 'KTD') {
       ctx.addIssue({
         code: 'custom',

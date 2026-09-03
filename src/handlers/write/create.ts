@@ -449,6 +449,7 @@ export async function writeActionCreate(ctx: SapWriteContext): Promise<ToolResul
     type,
     name,
     source,
+    hasSource,
     transport,
     lintOverride,
     preflightOverride,
@@ -604,11 +605,11 @@ export async function writeActionCreate(ctx: SapWriteContext): Promise<ToolResul
     // PUT back exactly the shape SAP gave us (with all the server-assigned
     // metadata), only swapping <sktd:text>.
     const shortTexts = args.shortTexts as KtdShortText[] | undefined;
-    if (source || shortTexts?.length) {
+    if (hasSource || shortTexts?.length) {
       const { source: currentEnvelope } = await client.getKtd(name);
       let body: string;
       try {
-        body = rewriteKtdDocument(currentEnvelope, source || undefined, shortTexts);
+        body = rewriteKtdDocument(currentEnvelope, hasSource ? source : undefined, shortTexts);
       } catch (err) {
         // The POST above already succeeded, so the KTD exists (empty). Say so — a
         // message about the Markdown alone invites the same create again, which 409s.
@@ -616,7 +617,9 @@ export async function writeActionCreate(ctx: SapWriteContext): Promise<ToolResul
         return errorResult(
           `Created SKTD ${name} in package ${pkg}, but the documentation was NOT written: ` +
             `${err instanceof Error ? err.message : String(err)}\n` +
-            `The object exists — retry with SAPWrite(action="update", type="SKTD", name="${name}", source=…).`,
+            `The object exists — retry with SAPWrite(action="update", type="SKTD", name="${name}", ` +
+            `${hasSource ? 'source=…' : ''}${hasSource && shortTexts?.length ? ', ' : ''}` +
+            `${shortTexts?.length ? 'shortTexts=[…]' : ''}).`,
         );
       }
       await safeUpdateObject(

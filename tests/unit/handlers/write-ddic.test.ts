@@ -12,6 +12,7 @@ import { AdtClient, createClient, mockFetch } from './setup-undici-mock.js';
 
 const { handleToolCall } = await import('../../../src/handlers/dispatch.js');
 const { resetCachedFeatures, setCachedFeatures } = await import('../../../src/handlers/feature-cache.js');
+const { stripLlmEmptyValues } = await import('../../../src/handlers/object-types.js');
 
 describe('SAPWrite handler — DDIC writes', () => {
   beforeEach(() => {
@@ -396,14 +397,14 @@ describe('SAPWrite handler — DDIC writes', () => {
     const KTD_ROOT_ID = 'ZTR_C_PAYMENT_VALUE_DATE';
     const KTD_FIELD_ID =
       '/sap/bc/adt/ddic/ddl/sources/ztr_c_payment_value_date/source/main#type=DDLS/DF;name=PaymentValueDate';
-    const twoNodeEnvelope = (rootText: string, fieldText: string) =>
+    const twoNodeEnvelope = (rootText: string, fieldText: string, fieldShortText = '') =>
       '<?xml version="1.0" encoding="UTF-8"?>' +
       '<sktd:docu xmlns:sktd="http://www.sap.com/wbobj/texts/sktd" xmlns:adtcore="http://www.sap.com/adt/core" ' +
       `adtcore:name="${KTD_ROOT_ID}" adtcore:type="SKTD/TYP" adtcore:responsible="LEMAIWO">` +
       '<adtcore:packageRef adtcore:name="ZE_TR"/>' +
       `<sktd:refObject adtcore:name="${KTD_ROOT_ID}" adtcore:type="DDLS/DF"/>` +
       `<sktd:element><sktd:id>${KTD_ROOT_ID}</sktd:id><sktd:text>${ktdB64(rootText)}</sktd:text><sktd:shortText sktd:text="" sktd:obligation="forbidden"/></sktd:element>` +
-      `<sktd:element><sktd:id>${KTD_FIELD_ID}</sktd:id><sktd:text>${ktdB64(fieldText)}</sktd:text><sktd:shortText sktd:text="" sktd:obligation="optional"/></sktd:element>` +
+      `<sktd:element><sktd:id>${KTD_FIELD_ID}</sktd:id><sktd:text>${ktdB64(fieldText)}</sktd:text><sktd:shortText sktd:text="${fieldShortText ? ktdB64(fieldShortText) : ''}" sktd:obligation="optional"/></sktd:element>` +
       '</sktd:docu>';
     const recordKtdCalls = (envelope: string) => {
       mockFetch.mockReset();
@@ -481,6 +482,24 @@ describe('SAPWrite handler — DDIC writes', () => {
       expect(putCall?.body).toContain(`<sktd:text>${ktdB64('field')}</sktd:text>`);
     });
 
+    // `text: ""` is a CLEAR, not pollution: stripLlmEmptyValues is shallow at the top level and
+    // deliberately does not recurse into leaf data arrays, so an empty short text survives to SAP.
+    it('clears an existing short text through the MCP boundary with text: ""', async () => {
+      const calls = recordKtdCalls(twoNodeEnvelope('root', 'field', 'Value date of the payment'));
+
+      const result = await handleToolCall(createClient(), DEFAULT_CONFIG, 'SAPWrite', {
+        action: 'update',
+        type: 'SKTD',
+        name: KTD_ROOT_ID,
+        shortTexts: [{ node: 'PaymentValueDate', text: '' }],
+      });
+
+      expect(result.isError).toBeUndefined();
+      const putCall = calls.find((c) => c.method === 'PUT');
+      expect(putCall?.body).toContain('<sktd:shortText sktd:text="" sktd:obligation="optional"/>');
+      expect(putCall?.body).not.toContain(ktdB64('Value date of the payment'));
+    });
+
     it('refuses a short text on the root (obligation forbidden) before taking a lock', async () => {
       const calls = recordKtdCalls(twoNodeEnvelope('root', 'field'));
 
@@ -512,6 +531,7 @@ describe('SAPWrite handler — DDIC writes', () => {
         shortTexts: [{ node: 'PaymentValueDate', text: 'x' }],
       });
 
+      expect(stripLlmEmptyValues({ source: '' }).source).toBeUndefined();
       expect(result.isError).toBeUndefined();
       const putCall = calls.find((c) => c.method === 'PUT');
       expect(putCall?.body).toContain(`sktd:text="${ktdB64('x')}"`);
@@ -565,6 +585,45 @@ describe('SAPWrite handler — DDIC writes', () => {
       expect(result.content[0]?.text).toContain('Created SKTD ZTR_C_PAYMENT_VALUE_DATE');
       const putCall = calls.find((c) => c.method === 'PUT');
       expect(putCall?.body).toContain(`sktd:text="${ktdB64('Value date')}"`);
+    });
+
+    // The POST already created the object, so the refusal must not read like a failed create —
+    // and the retry hint must name what the caller actually sent (shortTexts, not source).
+    it('SKTD create reports a short-text refusal as a partial success naming shortTexts', async () => {
+      mockFetch.mockReset();
+      const calls: Array<{ method: string; url: string; body?: string }> = [];
+      const created =
+        '<sktd:docu xmlns:sktd="http://www.sap.com/wbobj/texts/sktd" adtcore:name="ZTR_C_PAYMENT_VALUE_DATE">' +
+        `<sktd:element><sktd:id>${KTD_FIELD_ID}</sktd:id><sktd:text/><sktd:shortText sktd:text="" sktd:obligation="forbidden"/></sktd:element>` +
+        '</sktd:docu>';
+      mockFetch.mockImplementation((url: string | URL, opts?: { method?: string; body?: string | Buffer }) => {
+        const method = opts?.method ?? 'GET';
+        calls.push({ method, url: String(url), body: opts?.body ? String(opts.body) : undefined });
+        if (method === 'POST' && String(url).includes('_action=LOCK')) {
+          return Promise.resolve(mockResponse(200, KTD_LOCK_BODY, { 'x-csrf-token': 'T' }));
+        }
+        if (method === 'GET' && String(url).includes('/documentation/ktd/documents/')) {
+          return Promise.resolve(mockResponse(200, created, { 'x-csrf-token': 'T' }));
+        }
+        return Promise.resolve(mockResponse(201, '<sktd:docu/>', { 'x-csrf-token': 'T' }));
+      });
+
+      const result = await handleToolCall(createClient(), DEFAULT_CONFIG, 'SAPWrite', {
+        action: 'create',
+        type: 'SKTD',
+        name: 'ZTR_C_PAYMENT_VALUE_DATE',
+        package: '$TMP',
+        refObjectType: 'DDLS/DF',
+        shortTexts: [{ node: 'PaymentValueDate', text: 'Value date' }],
+      });
+
+      expect(result.isError).toBe(true);
+      const text = result.content[0]?.text ?? '';
+      expect(text).toContain('Created SKTD');
+      expect(text).toContain('does not take a short text');
+      expect(text).toContain('shortTexts=[…]');
+      expect(text).not.toContain('source=…');
+      expect(calls.some((c) => c.method === 'PUT')).toBe(false);
     });
 
     it('activates SKTD using the lowercased ADT URL in the objectReference', async () => {
