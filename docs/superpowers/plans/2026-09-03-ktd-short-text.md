@@ -80,21 +80,33 @@ Expected: FAIL — `KTD_META_MARKER`/`stripKtdMetaTrailer` are not exported.
 In `src/adt/ddic-xml.ts`, after `formatKtdUndocumentedIndex`:
 
 ```ts
+/** Stable prefix of `KTD_META_MARKER`; the strip matches on this, never on the prose. */
+const KTD_META_MARKER_PREFIX = '<!-- arc1:ktd-meta';
+
 /**
  * First line of the read-only metadata trailer `SAPRead` appends to a KTD (short texts,
  * undocumented-node index). An HTML comment: invisible when the Markdown renders, and the
  * writer cuts everything from this line on, so a whole SAPRead result pasted back into
- * SAPWrite never folds the trailer into the last node's body.
+ * SAPWrite never folds the trailer into the last node's body. The prefix is a wire contract
+ * with SAPRead output — do not reword it once released.
  */
-export const KTD_META_MARKER = '<!-- arc1:ktd-meta — read-only context below; SAPWrite ignores it -->';
+export const KTD_META_MARKER = `${KTD_META_MARKER_PREFIX} — read-only context below; SAPWrite ignores it -->`;
 
-/** Drop a SAPRead metadata trailer (everything from the first marker LINE on). */
+/**
+ * Drop a SAPRead metadata trailer: everything from the first LINE that starts with the
+ * marker prefix on. Slices the original string, so a body without a trailer is returned
+ * untouched and a body with one keeps its own line endings (byte-preserving).
+ */
 export function stripKtdMetaTrailer(markdown: string): string {
-  const lines = markdown.split(/\r?\n/);
-  const at = lines.findIndex((line) => line.startsWith(KTD_META_MARKER));
-  return at < 0 ? markdown : lines.slice(0, at).join('\n').trimEnd();
+  const at = markdown.search(/^<!-- arc1:ktd-meta/m);
+  return at < 0 ? markdown : markdown.slice(0, at).trimEnd();
 }
 ```
+
+(Review outcome folded in: matching on the stable prefix survives an LLM retyping the prose or
+normalizing the em dash; slicing instead of split/join keeps CRLF bodies byte-identical. Also add
+three tests: a trailer-only body hits the existing `/empty body/` refusal; a retyped prose tail
+still strips; CRLF input stays CRLF and a body without a trailer is returned untouched.)
 
 In `rewriteKtdText`, make the body trailer-free before anything else. Replace:
 
