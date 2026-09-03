@@ -81,7 +81,9 @@ Undocumented nodes: 68. …                     ← existing index; names spelle
   label can be copied back as `shortTexts[].node` or as a `## ` heading. Nodes without a short text
   are not listed; a stored value is normalised onto one line.
 - The undocumented-node index moves inside the trailer, separated by a blank line; it spells names
-  the same way (percent-decoded, entity-qualified).
+  the same way (percent-decoded, entity-qualified) and teaches the same addressing rule — add a
+  `## <name>` section using a listed name — so the two blocks never contradict each other. `[root]`
+  is derived from the document's own name; any other type-less id renders `[node]`.
 - The trailer is emitted only when it has content (some short text, or some undocumented node).
 - `grep` and the KTD block `SAPContext` prepends stay on the bare Markdown, as today.
 

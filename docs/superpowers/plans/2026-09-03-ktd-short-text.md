@@ -434,10 +434,12 @@ resolver docstrings, the symmetric four-spelling list, and a cross-spelling-coll
  * `resolveKtdNode` accepts, so it can be copied back as `shortTexts[].node` or a `## ` heading —
  * then the node type in brackets (`ZI_TRAVELTP.finalize [BDEF/BSO]`). The root node is its bare name.
  */
-function ktdNodeLabel(id: string): string {
+function ktdNodeLabel(id: string, rootName: string): string {
   const type = ktdNodeType(id);
-  // Every line is bracketed, so the header's copy rule ("the name before ' ['") is total.
-  return type ? `${ktdNodeQualifiedName(id)} [${type}]` : `${id} [root]`;
+  // Every line is bracketed, so the header's copy rule ("the name before ' ['") is total. `[root]`
+  // is asserted only for the id that IS the document's own name; any other type-less id is `[node]`.
+  if (type) return `${ktdNodeQualifiedName(id)} [${type}]`;
+  return id.toUpperCase() === rootName.toUpperCase() ? `${id} [root]` : `${id} [node]`;
 }
 
 /** `BDEF/BSO` for a fragment id, '' for the root node. Shared by the label and the undocumented index. */
@@ -464,10 +466,11 @@ name parser.
  * through the Markdown body.
  */
 export function formatKtdShortTexts(envelopeXml: string): string {
+  const rootName = envelopeKtdName(envelopeXml);
   const lines = findKtdElements(envelopeXml)
     .filter((element) => element.id)
     .map((element) => ({
-      label: ktdNodeLabel(element.id),
+      label: ktdNodeLabel(element.id, rootName),
       // One line per node whatever SAP stored.
       text: elementShortText(element.xml).replace(/\s+/g, ' ').trim(),
     }))
@@ -569,6 +572,16 @@ Same commit, three Task 4 review Minors in `src/adt/ddic-xml.ts`: `ktdNodeLabel`
 "brackets" was ambiguous next to `[{node,text}]`); `ktdNodeBase(id)` joins the name-helper family and
 replaces the last inline `#type=` scan in `formatKtdUndocumentedIndex`. The label round-trip test
 loops over every rendered line, including a bracket-less root carrying a short text.
+
+Review of 25545de (folded into the same task as a follow-up commit): the undocumented-node index
+header still told the reader to rebuild `<base>#type=<TYPE>;name=<NAME>` from a listed name, which
+since Task 4 is percent-decoded — the rebuilt id does not exist and the write is refused, while the
+short-texts block above teaches "use the name". Both blocks now teach one rule; the index header is
+`Undocumented nodes: N. SAP pre-created them with empty text; document one by adding a "## <name>"
+section using a name listed below.`, pinned by an index round-trip test (name from a rendered index
+line → `## <name>` heading → `rewriteKtdText` writes that node). `[root]` is asserted only when the
+id equals `envelopeKtdName`; other type-less ids render `[node]`. A read-level test covers the
+short-texts-only trailer (no index block, no trailing blank line).
 
 Test adjustments in `tests/unit/handlers/read.test.ts`, same step: in the undocumented-index test
 replace the ordering assertion (`text.indexOf(...) > text.indexOf(...)`) and its comment with the
@@ -1073,7 +1086,7 @@ and add a unit test asserting `adtcore:description="HTML summary"` appears in th
 
 - [ ] **Step 3: AGENTS.md** — append to the SKTD/KTD row: `Short texts: SAPWrite shortTexts=[{node,text}] (60 chars, forbidden on root/BAE, resolver exact→case→unique short name shared with headings); SAPRead lists them in a trailer behind KTD_META_MARKER that rewriteKtdText strips.`
 
-- [ ] **Step 4: Research note §8** — `## 8. Short texts (follow-up, implemented)`: the wire facts (§2 of the spec), the `[E]` outcome of Task 8, and the trailer decision. In the same file, refresh the sample index block in §6 so it shows the marker line first (`<!-- arc1:ktd-meta … -->`) and the blank line between the short-text block and the index — it currently reproduces the pre-marker output and would otherwise read as the live contract.
+- [ ] **Step 4: Research note §8** — `## 8. Short texts (follow-up, implemented)`: the wire facts (§2 of the spec), the `[E]` outcome of Task 8, and the trailer decision. In the same file, refresh the sample index block in §6 so it shows the marker line first (`<!-- arc1:ktd-meta … -->`), the blank line between the short-text block and the index, decoded node names, and the index header's rule (`"## <name>" section using a name listed below`) — it currently reproduces the pre-marker output and would otherwise read as the live contract.
 
 - [ ] **Step 5: Gate and commit**
 
