@@ -1037,8 +1037,14 @@ and `body = rewriteKtdText(currentEnvelope, source);` with:
 ```
 
 (On create an empty `source` means "no body" — the KTD is brand new, so there is nothing to erase;
-on update the handler passes `hasSource ? source : undefined`, so an explicit `""` reaches the
-empty-body refusal instead of being normalised away.)
+on update the handler passes `hasSource ? source : undefined`. Note from implementation: at the MCP
+boundary `stripLlmEmptyValues` (issue #360) removes empty strings for every tool before Zod, so an
+explicit `source: ""` never reaches the handler — `hasSource` is already false. The empty-body
+refusal therefore protects library/CLI callers of `rewriteKtdDocument`; through MCP, `source: ""`
+with `shortTexts` proceeds as a short-texts-only write, and `source: ""` alone hits "nothing to
+write". Adding `source` to the normaliser's meaningful-empty list would be a global change across
+all tools and was deliberately not made. The handler test for this case asserts the pipeline
+behaviour and points at the library-level contract test.)
 
 Adjust the success text to `Created SKTD ${name} in package ${pkg} and wrote its documentation.` and the partial-failure text to `…but the documentation was NOT written: …`.
 

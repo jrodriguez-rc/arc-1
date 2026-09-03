@@ -123,7 +123,7 @@ All validation completes before any lock is taken. Refusals list what the caller
 | node's `obligation="forbidden"` | error: this node (root/entity) does not take a short text |
 | `text` longer than 60 characters | error stating the length and the limit |
 | same node twice in `shortTexts` | error |
-| `source` supplied but empty/whitespace (with or without `shortTexts`) | existing empty-body refusal, which explains how to clear one node |
+| `source` supplied but empty/whitespace (with or without `shortTexts`) | existing empty-body refusal, which explains how to clear one node — enforced in `rewriteKtdDocument`; at the MCP tool boundary an empty `source` never arrives, because the LLM-argument normaliser (`stripLlmEmptyValues`, issue #360) drops empty strings for every tool before Zod, so there it is indistinguishable from "not supplied" |
 | neither `source` nor `shortTexts` supplied | "nothing to write" refusal naming both parameters |
 | element lacks `<sktd:shortText>` | error; ARC-1 does not synthesize the element |
 
