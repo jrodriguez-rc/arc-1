@@ -123,8 +123,13 @@ Treat the Bruno requests as a hypothesis log, not as the contract.
 
 `rewriteKtdText` is now the exact inverse of `decodeKtdText`:
 
-- A line is a node boundary **only** when it is `## ` followed by the *exact* id of an element in
-  this envelope. Ordinary Markdown headings inside a node's text survive untouched.
+- A line is a node boundary **only** when it is `## ` followed by a reference that resolves to an
+  element of this envelope: its exact id, a case variant, or its qualified node name (the spelling
+  SAPRead's trailer prints — see §8; bare names such as `## Update` are deliberately NOT boundaries,
+  because every BDEF carries `<Entity>.update`). Ordinary Markdown headings inside a node's text
+  survive untouched; a heading that is unmistakably a node reference but matches nothing (an ADT
+  URI, a `#type=` fragment, or `<KnownEntity>.<typo>`) is refused instead of being folded into the
+  previous node.
 - Each addressed section is Base64-encoded and spliced into that element's `<sktd:text>`, including
   the self-closing `<sktd:text/>` of a node nobody has documented yet. Elements the body does not
   address stay byte-identical, so a partial update is safe.
@@ -264,8 +269,10 @@ BDEF/BAC (14): ZI_TravelTP.SetPhoto, ZI_TravelTP.DeletePhoto, …
 Every name is reconstructible exactly (the index is produced by splitting real ids on the first
 `#type=` and `;name=`, never by synthesis). Roughly 2–3 KB on the largest live object, and nothing at
 all when every node is documented. The index no longer teaches rebuilding a full
-id — SAPWrite now resolves a bare node name (exact, then case-insensitive, then unique short name),
-so the shorter names are directly usable. `stripKtdMetaTrailer` cuts everything from the marker line
+id — SAPWrite resolves the printed name (exact id, then case-insensitive id, then the unique
+qualified node name), so the shorter names are directly usable. Every printed name is guaranteed to
+resolve back to the node it was printed for (`addressableKtdName`): a BDEF's root-entity node is named
+like the object itself, and that name resolves to the root, so the entity is listed by its full id. `stripKtdMetaTrailer` cuts everything from the marker line
 on before either the Markdown-body or the short-text write path runs, so a whole `SAPRead` result can
 be pasted straight back into `SAPWrite(source=...)` — the paste-back hazard the old `---` separator
 design would have had is closed by construction, not by convention.
@@ -299,12 +306,18 @@ the envelope before splicing any bytes, so a refusal never leaves a half-applied
 `node` resolves through `resolveKtdNode`/`resolveKtdNodeIn` in three passes, first match wins: exact
 id, then case-insensitive id, then a node name that exactly one node carries — qualified
 (`ZI_TravelTP.GetPhoto`) or short (`GetPhoto`, `finalize`, `%_OWN`), decoded or exactly as SAP
-encodes it on the wire (`%25_OWN`). The identical resolver backs `## <name>` Markdown headings
-(`splitKtdMarkdownByElementId`), so a prose heading that happens to equal a node's short name binds
-to that node — an accepted trade-off, not a bug.
+encodes it on the wire (`%25_OWN`). The same resolver backs `## <name>` Markdown headings
+(`splitKtdMarkdownByElementId`) but there it accepts only the qualified spellings: every BDEF carries
+`<Entity>.create/update/delete` nodes, so a bare `## Update` in the root's prose must stay prose
+(release review 2026-09-03 — the first cut let bare names bind, which moved `## Update` sections out
+of the root body). A heading that is unmistakably a node reference yet matches nothing — an ADT URI,
+a `#type=` fragment, or `<KnownEntity>.<typo>` — is refused rather than folded into the previous
+node. A `## ` section pasted BELOW the SAPRead trailer is refused too, since the trailer would have
+swallowed it silently.
 
 Refusals (all raised before any ADT lock, from `rewriteKtdDocument`/`applyKtdShortTexts`):
-unknown node (lists the envelope's valid ids), ambiguous short name (lists the candidate nodes —
+unknown node (lists the known nodes compactly, by name grouped by base and type — not ~80 raw ids),
+ambiguous name (lists the candidate nodes —
 the resolver never guesses), a node whose `<sktd:shortText>` is `obligation="forbidden"` (root or
 entity), text over 60 UTF-16 code units (`text.length` in JS; `[E]` SAP accepted a 30-emoji value —
 60 UTF-16 units, 30 code points — so the unit is consistent with how an ABAP CHAR60 field counts;

@@ -1201,3 +1201,31 @@ AGENTS.md row wording. Deferred as a follow-up, not for this PR: extracting the 
 (~500 of 1,137 lines) into `src/adt/ktd-xml.ts` as a move-only refactor with its tests.
 
 PR step: waits on PR #2 (`fix/sktd-multi-node-write`), which this branch is stacked on.
+
+## Release review outcome (2026-09-03, 7 lenses → 48 unique findings → 22 confirmed by refuters)
+
+Applied on the branch (see the two commits after 8dcb1bd):
+
+- Correctness: trailer names are guaranteed to round-trip (`addressableKtdName` — a BDEF's root
+  entity node is named like the object, and that name resolves to the root, so the entity is listed
+  by full id); a `## ` section pasted below the SAPRead trailer is refused instead of silently
+  dropped; `## ` headings resolve qualified names only (bare `## Update` stays prose — every BDEF has
+  `<Entity>.update`), while `shortTexts[].node` keeps all four spellings; a typo in a qualified
+  heading (`ZI_TravelTP.GetPhotos`) is refused instead of folded into the previous node; the heading
+  regex was quadratic in the line length (ReDoS on `source`) and is now linear.
+- Simplification: one back-to-front splice helper (`spliceKtdElements`) instead of three copies;
+  `rewriteKtdDocument` no longer repeats the strip/empty check `rewriteKtdText` performs;
+  `stripKtdMetaTrailer` searches the constant instead of a retyped regex literal; the unknown-node
+  refusal lists nodes compactly (names grouped by base/type) instead of ~80 raw ids; the create
+  handler's partial-success guard now covers the GET and the PUT, not only the rewrite.
+- Tests for each of the above plus CRLF bodies, exactly-60/non-BMP short texts, the lone
+  `<sktd:text>` path, the `shortTexts` action gate, the neither-source-nor-shortTexts update, and the
+  retry-hint variants. `tests/unit/handlers/write-ddic.test.ts` crossed the 3000-line budget → 3100
+  with the SKTD block named as the split.
+- Docs: tools.md (SKTD is not a `/source/main` write; the index lists names), research §4/§8, spec
+  §4, AGENTS row.
+
+Refuted or deferred: the resolver hardening that would make `## ZI_TravelTP` ambiguous (changes the
+documented contract; separate change if wanted), `decodeKtdText` rebuilt on `findKtdElements`
+(behaviour-preserving refactor, follow-up with the `ktd-xml.ts` split), per-write element rescans
+(measured negligible at 91 nodes).

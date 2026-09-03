@@ -110,7 +110,10 @@ parsing and by `shortTexts[].node`:
    reference are tried because the wire carries names entity-qualified and percent-encoded
    (`ZI_TravelTP.GetPhoto`, `%25_OWN`): the qualified name and its last dot-segment, each
    percent-decoded and as encoded on the wire — so `GetPhoto`, `ZI_TravelTP.GetPhoto`, `%_OWN`
-   and `%25_OWN` all resolve (grew during implementation, see the research note §8);
+   and `%25_OWN` all resolve for `shortTexts[].node` (grew during implementation, see the research
+   note §8). `## ` headings accept only the qualified spellings: every BDEF carries
+   `<Entity>.create/update/delete` nodes, so a bare `## Update` must stay prose (release review,
+   2026-09-03);
 4. otherwise an error: unknown (lists valid ids) or ambiguous (lists the candidates with full ids,
    e.g. `update` exists once per entity).
 
