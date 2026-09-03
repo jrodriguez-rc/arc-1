@@ -66,7 +66,7 @@ After the decoded Markdown, a **metadata trailer** introduced by a marker line:
 
 ```
 <!-- arc1:ktd-meta — read-only context below; SAPWrite ignores it -->
-Short texts (SAPWrite shortTexts=[{node,text}]; node = the name before the brackets):
+Short texts (SAPWrite shortTexts=[{node,text}]; node = the name before " ["):
   ZI_TravelTP.finalize [BDEF/BSO]: Saver: FINALIZE — last determinations before save
   ZI_TravelTP.GetPhoto [BDEF/BAF]: Read the stored photo
 
@@ -76,8 +76,8 @@ Undocumented nodes: 68. …                     ← existing index; names spelle
 - The marker is an HTML comment: invisible when the Markdown is rendered, unambiguous to parse.
   The writer matches it by its stable prefix `<!-- arc1:ktd-meta`, so a retyped prose tail still
   strips.
-- Short texts list every node that has one, as `<qualified name> [<TYPE>]: <text>` (root nodes show
-  their bare name). The name comes first and is spelled exactly as the resolver accepts it, so a
+- Short texts list every node that has one, as `<qualified name> [<TYPE>]: <text>` (the root node
+  renders as `<name> [root]`, so every line is bracketed). The name comes first and is spelled exactly as the resolver accepts it, so a
   label can be copied back as `shortTexts[].node` or as a `## ` heading. Nodes without a short text
   are not listed; a stored value is normalised onto one line.
 - The undocumented-node index moves inside the trailer, separated by a blank line; it spells names

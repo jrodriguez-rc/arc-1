@@ -388,7 +388,7 @@ Import `formatKtdShortTexts`. Add:
 ```ts
       it('formatKtdShortTexts lists nodes that have a short text as "<TYPE> <name>: <text>"', () => {
         const block = formatKtdShortTexts(liveEnvelope);
-        expect(block).toContain('Short texts (SAPWrite shortTexts=[{node,text}]; node = the name before the brackets):');
+        expect(block).toContain('Short texts (SAPWrite shortTexts=[{node,text}]; node = the name before " ["):');
         expect(block).toContain('  ZI_TRAVELTP.finalize [BDEF/BSO]: Saver: FINALIZE — last determinations before save');
         // The undocumented sibling has an empty short text and is not listed.
         expect(block).not.toContain('ReadTravelSummaryHTML');
@@ -436,7 +436,8 @@ resolver docstrings, the symmetric four-spelling list, and a cross-spelling-coll
  */
 function ktdNodeLabel(id: string): string {
   const type = ktdNodeType(id);
-  return type ? `${ktdNodeQualifiedName(id)} [${type}]` : id;
+  // Every line is bracketed, so the header's copy rule ("the name before ' ['") is total.
+  return type ? `${ktdNodeQualifiedName(id)} [${type}]` : `${id} [root]`;
 }
 
 /** `BDEF/BSO` for a fragment id, '' for the root node. Shared by the label and the undocumented index. */
@@ -473,7 +474,7 @@ export function formatKtdShortTexts(envelopeXml: string): string {
     .filter((entry) => entry.text)
     .map((entry) => `  ${entry.label}: ${entry.text}`);
   if (lines.length === 0) return '';
-  return ['Short texts (SAPWrite shortTexts=[{node,text}]; node = the name before the brackets):', ...lines].join('\n');
+  return ['Short texts (SAPWrite shortTexts=[{node,text}]; node = the name before " ["):', ...lines].join('\n');
 }
 ```
 
@@ -562,6 +563,12 @@ which all sit on these same lines. Replace the whole trailer block (comments inc
 body/marker separator is the same `'\n\n'` as before. All four input combinations of empty/non-empty
 `markdown`/`trailer` produce the same output as the previous nested ternary, except that the blank
 line between blocks is new.)
+
+Same commit, three Task 4 review Minors in `src/adt/ddic-xml.ts`: `ktdNodeLabel` renders the root as
+`<id> [root]` so every line is bracketed; the header reads `node = the name before " ["` (the word
+"brackets" was ambiguous next to `[{node,text}]`); `ktdNodeBase(id)` joins the name-helper family and
+replaces the last inline `#type=` scan in `formatKtdUndocumentedIndex`. The label round-trip test
+loops over every rendered line, including a bracket-less root carrying a short text.
 
 Test adjustments in `tests/unit/handlers/read.test.ts`, same step: in the undocumented-index test
 replace the ordering assertion (`text.indexOf(...) > text.indexOf(...)`) and its comment with the
