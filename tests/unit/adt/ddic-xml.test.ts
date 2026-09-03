@@ -16,6 +16,7 @@ import {
   normalizeCloudResponsible,
   normalizeSrvbBindingType,
   parseTableType,
+  resolveKtdNode,
   rewriteKtdText,
   stripKtdMetaTrailer,
 } from '../../../src/adt/ddic-xml.js';
@@ -1089,6 +1090,42 @@ describe('ddic-xml builders', () => {
       it('stripKtdMetaTrailer keeps the body bytes: CRLF input stays CRLF, nothing is re-joined', () => {
         expect(stripKtdMetaTrailer(`line1\r\nline2\r\n\r\n${KTD_META_MARKER}\r\nanything`)).toBe('line1\r\nline2');
         expect(stripKtdMetaTrailer('line1\r\nline2\r\n')).toBe('line1\r\nline2\r\n');
+      });
+
+      it('resolveKtdNode: exact id, case-insensitive id, unique short name (percent-decoded); unknown is undefined', () => {
+        const envelope = buildMultiEnvelope({ [ROOT_ID]: 'r', [BAT_ID]: 'b', [BAF_ID]: 'f' });
+        expect(resolveKtdNode(envelope, ROOT_ID)?.id).toBe(ROOT_ID);
+        expect(resolveKtdNode(envelope, 'zi_traveltp')?.id).toBe(ROOT_ID);
+        expect(resolveKtdNode(envelope, '%_OWN')?.id).toBe(BAT_ID);
+        expect(resolveKtdNode(envelope, '%25_OWN')?.id).toBe(BAT_ID);
+        expect(resolveKtdNode(envelope, 'readtravelsummary')?.id).toBe(BAF_ID);
+        expect(resolveKtdNode(envelope, 'ZI_TravelTP.ReadTravelSummary')?.id).toBe(BAF_ID);
+        expect(resolveKtdNode(envelope, 'nope')).toBeUndefined();
+        expect(resolveKtdNode(envelope, '   ')).toBeUndefined();
+      });
+
+      it('resolveKtdNode: a short name shared by several nodes is ambiguous, not a guess', () => {
+        const base = '/sap/bc/adt/bo/behaviordefinitions/zi_traveltp/source/main';
+        const envelope = buildMultiEnvelope({
+          [`${base}#type=BDEF/BSO;name=ZI_TravelTP.update`]: 'a',
+          [`${base}#type=BDEF/BSO;name=ZI_TravelBookingTP.update`]: 'b',
+        });
+        expect(() => resolveKtdNode(envelope, 'update')).toThrow(
+          /ambiguous[\s\S]*ZI_TravelTP\.update[\s\S]*ZI_TravelBookingTP\.update/,
+        );
+        expect(resolveKtdNode(envelope, 'ZI_TravelBookingTP.update')?.id).toBe(
+          `${base}#type=BDEF/BSO;name=ZI_TravelBookingTP.update`,
+        );
+      });
+
+      it('headings accept a unique short name and still refuse an unknown ADT-shaped id', () => {
+        const envelope = buildMultiEnvelope({ [ROOT_ID]: 'r', [BAT_ID]: 'b' });
+        const rewritten = rewriteKtdText(envelope, '## %_OWN\n\nbat by short name');
+        expect(rewritten).toContain(`<sktd:id>${BAT_ID}</sktd:id><sktd:text>${b64('bat by short name')}</sktd:text>`);
+        expect(() => rewriteKtdText(envelope, `## ${BAF_ID}\n\nx`)).toThrow(/does not exist/);
+        // Prose stays prose: no node is named like this, so it is body content of the root.
+        const prose = rewriteKtdText(envelope, `## ${ROOT_ID}\n\n## /notes/package layout\n\ntext`);
+        expect(decodeKtdText(prose)).toContain('## /notes/package layout');
       });
 
       it('Markdown body is encoded, not interpolated as raw text (prevents XML injection via user input)', () => {

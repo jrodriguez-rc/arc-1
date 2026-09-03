@@ -816,6 +816,61 @@ function unknownKtdNodeError(ids: string[], knownIds: Iterable<string>): Error {
 }
 
 /**
+ * The `name=` part of a fragment id, percent-decoded (`%25_OWN` on the wire is the node
+ * `%_OWN`), or the whole id for the root node. Falls back to the raw text when the
+ * encoding is malformed. A name qualified with its owner (`ZI_TravelTP.update`) is
+ * reduced to the bit after the last dot (`update`) — that trailing segment is what
+ * a caller means by the node's "short name"; ambiguity across owners is deliberate
+ * (see `resolveKtdNodeIn`), not resolved here.
+ */
+function ktdNodeShortName(id: string): string {
+  const at = id.indexOf(';name=');
+  const raw = at < 0 ? id : id.slice(at + ';name='.length);
+  let decoded = raw;
+  try {
+    decoded = decodeURIComponent(raw);
+  } catch {
+    // keep raw
+  }
+  const dot = decoded.lastIndexOf('.');
+  return dot < 0 ? decoded : decoded.slice(dot + 1);
+}
+
+/**
+ * Resolve a node reference against the envelope: exact id, then case-insensitive id,
+ * then a short name (`GetPhoto`, `finalize`, `%_OWN`, the root's own name — decoded or
+ * as encoded on the wire) that exactly one node carries. Returns undefined when nothing
+ * matches; throws when a short name is ambiguous — it never picks one of several.
+ */
+export function resolveKtdNode(envelopeXml: string, ref: string): KtdElement | undefined {
+  return resolveKtdNodeIn(findKtdElements(envelopeXml), ref);
+}
+
+function resolveKtdNodeIn(elements: KtdElement[], ref: string): KtdElement | undefined {
+  const wanted = ref.trim();
+  if (!wanted) return undefined;
+  const exact = elements.find((element) => element.id === wanted);
+  if (exact) return exact;
+  const upper = wanted.toUpperCase();
+  const byCase = elements.find((element) => element.id.toUpperCase() === upper);
+  if (byCase) return byCase;
+  const byName = elements.filter((element) => {
+    if (!element.id) return false;
+    const at = element.id.indexOf(';name=');
+    const rawName = at < 0 ? element.id : element.id.slice(at + ';name='.length);
+    return ktdNodeShortName(element.id).toUpperCase() === upper || rawName.toUpperCase() === upper;
+  });
+  if (byName.length === 1) return byName[0];
+  if (byName.length > 1) {
+    throw new Error(
+      `KTD node "${wanted}" is ambiguous — ${byName.length} nodes carry that name. Use the full id:\n` +
+        byName.map((element) => `  ${element.id}`).join('\n'),
+    );
+  }
+  return undefined;
+}
+
+/**
  * Split a Markdown body into per-node bodies — the inverse of `decodeKtdText`.
  *
  * A line is a node boundary only when it is `## ` followed by the EXACT id of an
@@ -826,16 +881,7 @@ function unknownKtdNodeError(ids: string[], knownIds: Iterable<string>): Error {
  * created one); the caller then treats the whole body as that one node's text.
  */
 function splitKtdMarkdownByElementId(markdown: string, elements: KtdElement[]): Map<string, string> | undefined {
-  // Keyed case-insensitively, resolving to the element's own spelling. ABAP names are
-  // case-insensitive, and the root node's id is upper-cased (`ZI_TRAVELTP`) while
-  // the same object is spelled `ZI_TravelTP` everywhere else in the envelope — a
-  // heading in the second spelling used to be folded into the previous node's text.
-  // First spelling wins, so a case collision can never silently pick the other element.
-  const knownIds = new Map<string, string>();
-  for (const element of elements) {
-    const key = element.id.toUpperCase();
-    if (element.id && !knownIds.has(key)) knownIds.set(key, element.id);
-  }
+  const knownIds = elements.map((element) => element.id).filter(Boolean);
   const lines = markdown.split(/\r?\n/);
   const headings: Array<{ line: number; id: string }> = [];
   const unknown: string[] = [];
@@ -844,15 +890,17 @@ function splitKtdMarkdownByElementId(markdown: string, elements: KtdElement[]): 
     const heading = line.match(/^##[ \t]+(.+?)[ \t]*$/);
     if (!heading) return;
     const id = heading[1];
-    const resolved = knownIds.get(id.toUpperCase());
-    if (resolved) headings.push({ line: index, id: resolved });
+    // Exact, case-insensitive, or unique short name — one resolver for headings and
+    // shortTexts[].node. An ambiguous short name throws here with the candidates.
+    const resolved = knownIds.length > 0 ? resolveKtdNodeIn(elements, id) : undefined;
+    if (resolved) headings.push({ line: index, id: resolved.id });
     // Unmistakably an ADT node id, yet no element here carries it: a typo, or a node
     // that does not exist yet. Never silently fold it into a neighbouring node's text.
     // The test is deliberately narrow so ordinary prose headings stay prose.
-    else if (knownIds.size > 0 && (id.startsWith('/sap/bc/adt/') || id.includes('#type='))) unknown.push(id);
+    else if (knownIds.length > 0 && (id.startsWith('/sap/bc/adt/') || id.includes('#type='))) unknown.push(id);
   });
 
-  if (unknown.length > 0) throw unknownKtdNodeError(unknown, knownIds.values());
+  if (unknown.length > 0) throw unknownKtdNodeError(unknown, knownIds);
   if (headings.length === 0) return undefined;
 
   const preamble = lines.slice(0, headings[0].line).join('\n').trim();
