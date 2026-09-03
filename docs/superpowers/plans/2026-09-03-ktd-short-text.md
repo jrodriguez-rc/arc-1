@@ -719,7 +719,7 @@ In `src/adt/ddic-xml.ts`, after `rewriteKtdText`:
 
 ```ts
 /** `sktd:obligation` attribute of the element's `<sktd:shortText>`. */
-const SHORT_TEXT_OBLIGATION_ATTR = /<sktd:shortText\b[^>]*\bsktd:obligation="([^"]*)"/;
+const SHORT_TEXT_OBLIGATION_ATTR = /<sktd:shortText\b[^>]*?\bsktd:obligation="([^"]*)"/; // lazy, like SHORT_TEXT_ATTR
 
 /** `sktd:obligation` of the element's short text: 'optional' | 'forbidden' | 'mandatory' | ''. */
 function elementShortTextObligation(elementXml: string): string {
@@ -882,6 +882,22 @@ Then add:
       expect(calls.some((c) => c.url.includes('_action=LOCK'))).toBe(false);
     });
 
+    it('an explicit empty source is refused even when shortTexts is present', async () => {
+      const calls = recordKtdCalls(twoNodeEnvelope('root', 'field'));
+
+      const result = await handleToolCall(createClient(), DEFAULT_CONFIG, 'SAPWrite', {
+        action: 'update',
+        type: 'SKTD',
+        name: KTD_ROOT_ID,
+        source: '',
+        shortTexts: [{ node: 'PaymentValueDate', text: 'x' }],
+      });
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0]?.text).toContain('empty body');
+      expect(calls.some((c) => c.method === 'PUT')).toBe(false);
+    });
+
     it('rejects shortTexts on a non-KTD type at the schema', async () => {
       const result = await handleToolCall(createClient(), DEFAULT_CONFIG, 'SAPWrite', {
         action: 'update',
@@ -1020,6 +1036,10 @@ and `body = rewriteKtdText(currentEnvelope, source);` with:
         body = rewriteKtdDocument(currentEnvelope, source || undefined, shortTexts);
 ```
 
+(On create an empty `source` means "no body" — the KTD is brand new, so there is nothing to erase;
+on update the handler passes `hasSource ? source : undefined`, so an explicit `""` reaches the
+empty-body refusal instead of being normalised away.)
+
 Adjust the success text to `Created SKTD ${name} in package ${pkg} and wrote its documentation.` and the partial-failure text to `…but the documentation was NOT written: …`.
 
 - [ ] **Step 6: Regenerate the tool-definition snapshot and check the budget**
@@ -1069,6 +1089,8 @@ Call `SAPWrite(action="update", type="SKTD", name="ZARC1_KTD_ROOT", shortTexts=[
 `SAPRead(type="SKTD", name="ZARC1_KTD_ROOT", version="inactive")` — the trailer must show `BDEF/BSO ZARC1_KTD_ROOT.create: Creates one row`. Then obtain the raw XML (the user runs the same `curl` as on 2026-09-02, against the trial host) and inspect the `create` element:
 - `sktd:shortText/@sktd:text` = base64("Creates one row") — expected.
 - `adtcore:objectReference/@adtcore:description`: **followed** (SAP derives it) or **unchanged**?
+
+- [ ] **Step 2b: Confirm the length unit.** The error message claims SAP counts UTF-16 units ("as ABAP counts them"). Send a short text of 30 emoji (60 UTF-16 units, 30 code points) to the `create` node: accepted by ARC-1; if SAP also accepts it, then 31 emoji (62 units) must be refused by ARC-1 before any lock. If SAP itself rejects the 30-emoji value, or accepts a 31-emoji value sent by other means (e.g. Eclipse), soften the wording in `applyKtdShortTexts` to "characters (UTF-16 units)" without the ABAP attribution and record the observation `[E]`.
 
 - [ ] **Step 3a: If `description` followed** — no code change. Record in the research note (Task 9) with `[E]`.
 
