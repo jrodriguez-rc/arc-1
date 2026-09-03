@@ -54,7 +54,9 @@ shortTexts: [{ node: string, text: string }]
 ```
 
 - `node` — a node reference resolved by the shared resolver (§4).
-- `text` — the new short text; at most 60 characters after trimming; `""` clears it.
+- `text` — the new short text, normalised onto one line (whitespace runs collapsed, ends trimmed) so
+  the stored value equals what `SAPRead` shows; at most 60 characters counted as UTF-16 units, the way
+  an ABAP CHAR60 field counts; `""` clears it.
 - `source` becomes **optional** when `shortTexts` is present. A call may change bodies only,
   short texts only, or both.
 - `create` accepts `shortTexts` alongside `source`; it runs through the same envelope rewrite
@@ -121,7 +123,8 @@ All validation completes before any lock is taken. Refusals list what the caller
 | node's `obligation="forbidden"` | error: this node (root/entity) does not take a short text |
 | `text` longer than 60 characters | error stating the length and the limit |
 | same node twice in `shortTexts` | error |
-| neither `source` nor `shortTexts` | existing empty-body refusal |
+| `source` supplied but empty/whitespace (with or without `shortTexts`) | existing empty-body refusal, which explains how to clear one node |
+| neither `source` nor `shortTexts` supplied | "nothing to write" refusal naming both parameters |
 | element lacks `<sktd:shortText>` | error; ARC-1 does not synthesize the element |
 
 ## 6. Write flow

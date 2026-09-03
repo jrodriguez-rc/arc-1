@@ -414,7 +414,7 @@ After `elementBase64` in `src/adt/ddic-xml.ts`:
 
 ```ts
 /** `sktd:text` attribute of the element's `<sktd:shortText>`: Base64 of the short text, '' when none. */
-const SHORT_TEXT_ATTR = /<sktd:shortText\b[^>]*\bsktd:text="([^"]*)"/;
+const SHORT_TEXT_ATTR = /<sktd:shortText\b[^>]*?\bsktd:text="([^"]*)"/; // lazy: reader and writer bind to the FIRST sktd:text
 
 /** Decoded short text of an element, '' when empty or absent. */
 function elementShortText(elementXml: string): string {
@@ -684,7 +684,10 @@ Import `rewriteKtdDocument` and the type `KtdShortText`. Inside `describe('live 
           ]),
         ).toThrow(/twice/);
         expect(() => rewriteKtdDocument(liveEnvelope, undefined, undefined)).toThrow(/nothing to write/i);
-        expect(() => rewriteKtdDocument(liveEnvelope, '', [])).toThrow(/nothing to write/i);
+        // An explicit empty body is the erase hazard, refused even when short texts are present.
+        expect(() => rewriteKtdDocument(liveEnvelope, '', [])).toThrow(/empty body/);
+        expect(() => rewriteKtdDocument(liveEnvelope, '', [{ node: 'finalize', text: 'x' }])).toThrow(/empty body/);
+        expect(() => rewriteKtdDocument(liveEnvelope, '   ', [{ node: 'finalize', text: 'x' }])).toThrow(/empty body/);
       });
 
       it('rewriteKtdDocument refuses a node whose element has no <sktd:shortText>', () => {
@@ -738,12 +741,16 @@ export const KTD_SHORT_TEXT_MAX_LENGTH = 60;
  * before any byte changes, so a refusal never leaves a half-applied document.
  */
 export function rewriteKtdDocument(envelopeXml: string, markdown: string | undefined, shortTexts: KtdShortText[] | undefined): string {
-  const body = markdown === undefined ? '' : stripKtdMetaTrailer(markdown);
+  // "Not supplied" and "supplied empty" are different requests: an explicit empty body is the
+  // erase-everything hazard rewriteKtdText already refuses (same message, shared constant), even
+  // when shortTexts is present; "nothing to write" is only for the both-absent call.
+  const body = markdown === undefined ? undefined : stripKtdMetaTrailer(markdown);
   const assignments = shortTexts ?? [];
-  if (!body.trim() && assignments.length === 0) {
+  if (body !== undefined && !body.trim()) throw new Error(KTD_EMPTY_BODY_MESSAGE);
+  if (body === undefined && assignments.length === 0) {
     throw new Error('KTD documentation update has nothing to write: pass "source" (node bodies), "shortTexts", or both.');
   }
-  let rewritten = body.trim() ? rewriteKtdText(envelopeXml, body) : envelopeXml;
+  let rewritten = body === undefined ? envelopeXml : rewriteKtdText(envelopeXml, body);
   if (assignments.length > 0) rewritten = applyKtdShortTexts(rewritten, assignments);
   return rewritten;
 }
@@ -759,10 +766,13 @@ function applyKtdShortTexts(envelopeXml: string, assignments: KtdShortText[]): s
     if (resolved.has(element.id)) {
       throw new Error(`KTD node "${element.id}" appears twice in shortTexts — keep one entry per node.`);
     }
-    const trimmed = text.trim();
+    // Normalised the way the reader displays it, so stored and shown values agree; a short text
+    // is single-line by nature.
+    const trimmed = text.replace(/\s+/g, ' ').trim();
+    // UTF-16 code units, which is how an ABAP CHAR60 field counts.
     if (trimmed.length > KTD_SHORT_TEXT_MAX_LENGTH) {
       throw new Error(
-        `Short text for KTD node "${element.id}" is ${trimmed.length} characters; SAP allows ${KTD_SHORT_TEXT_MAX_LENGTH}.`,
+        `Short text for KTD node "${element.id}" is ${trimmed.length} characters (UTF-16 units, as ABAP counts them); SAP allows ${KTD_SHORT_TEXT_MAX_LENGTH}.`,
       );
     }
     if (!SHORT_TEXT_ATTR.test(element.xml)) {
