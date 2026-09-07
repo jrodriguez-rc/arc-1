@@ -846,7 +846,8 @@ export function getToolDefinitions(
           },
           refObjectDescription: {
             type: 'string',
-            description: 'SKTD/KTD create: description of the parent object (shown in Eclipse tooltips).',
+            description:
+              'SKTD/KTD create: description of the parent object (shown in Eclipse tooltips). Must not be empty — SAP rejects an empty value with HTTP 400 "Check of condition failed"; when omitted or blank ARC-1 sends the KTD "description" (default: the object name).',
           },
           shortTexts: {
             type: 'array',
