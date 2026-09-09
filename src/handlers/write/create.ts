@@ -570,7 +570,10 @@ export async function writeActionCreate(ctx: SapWriteContext): Promise<ToolResul
         `SKTD name "${name}" must match refObjectName "${refName}" — a Knowledge Transfer Document inherits the name of the ABAP object it documents (one KTD per object). To document "${refName}", call SAPWrite(action="create", type="SKTD", name="${refName}", refObjectType="${refType}", ...).`,
       );
     }
-    const refDescription = String(args.refObjectDescription ?? '');
+    // SAP rejects an EMPTY refObject description: POST /documentation/ktd/documents answers HTTP 400
+    // "Check of condition failed" (live-verified on SAP_BASIS 7.58) and accepts any non-empty value.
+    // Fall back to the KTD's own description (itself defaulting to the name) so the attribute is never empty.
+    const refDescription = String(args.refObjectDescription ?? '').trim() || description.trim() || name;
     // Build the parent URI. ADT URIs use lowercase names by convention (matches the Eclipse trace).
     const refParentType = refType.split('/')[0] ?? '';
     const refUri = `${objectBasePath(refParentType)}${encodeURIComponent(refName.toLowerCase())}`;

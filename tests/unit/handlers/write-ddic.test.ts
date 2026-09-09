@@ -533,6 +533,69 @@ describe('SAPWrite handler — DDIC writes', () => {
       expect(postCall!.body).toContain('adtcore:description="Treasury Payment Value Date"');
     });
 
+    it('SKTD create never sends an empty refObject description (SAP 400 "Check of condition failed")', async () => {
+      // Live-verified on SAP_BASIS 7.58: POST /documentation/ktd/documents rejects an empty
+      // adtcore:description on <sktd:refObject> with HTTP 400 "Check of condition failed", and
+      // accepts any non-empty value. Fall back to the KTD's own description, then to the name.
+      const capturePost = () => {
+        mockFetch.mockReset();
+        const calls: Array<{ method: string; url: string; body?: string }> = [];
+        mockFetch.mockImplementation((url: string | URL, opts?: { method?: string; body?: string | Buffer }) => {
+          calls.push({
+            method: opts?.method ?? 'GET',
+            url: String(url),
+            body: opts?.body ? String(opts.body) : undefined,
+          });
+          return Promise.resolve(mockResponse(201, '<sktd:docu/>', { 'x-csrf-token': 'T' }));
+        });
+        return () => calls.find((c) => c.method === 'POST' && c.url.includes('/documentation/ktd/documents'));
+      };
+
+      // 1. Omitted refObjectDescription + explicit KTD description → KTD description.
+      let post = capturePost();
+      let result = await handleToolCall(createClient(), DEFAULT_CONFIG, 'SAPWrite', {
+        action: 'create',
+        type: 'SKTD',
+        name: 'ZTR_C_PAYMENT_VALUE_DATE',
+        package: '$TMP',
+        description: 'Payment value date docs',
+        refObjectType: 'DDLS/DF',
+      });
+      expect(result.isError).toBeUndefined();
+      expect(post()?.body).toContain('adtcore:description="Payment value date docs"');
+      expect(post()?.body).not.toContain('adtcore:description=""');
+
+      // 2. Empty / whitespace refObjectDescription and no KTD description → the object name.
+      post = capturePost();
+      result = await handleToolCall(createClient(), DEFAULT_CONFIG, 'SAPWrite', {
+        action: 'create',
+        type: 'SKTD',
+        name: 'ZTR_C_PAYMENT_VALUE_DATE',
+        package: '$TMP',
+        refObjectType: 'DDLS/DF',
+        refObjectDescription: '   ',
+      });
+      expect(result.isError).toBeUndefined();
+      expect(post()?.body).toContain('adtcore:description="ZTR_C_PAYMENT_VALUE_DATE"');
+      expect(post()?.body).not.toContain('adtcore:description=""');
+
+      // 3. Empty string on both → still the object name (stripLlmEmptyValues drops "" before this branch,
+      //    but the handler must hold on its own).
+      post = capturePost();
+      result = await handleToolCall(createClient(), DEFAULT_CONFIG, 'SAPWrite', {
+        action: 'create',
+        type: 'SKTD',
+        name: 'ZTR_C_PAYMENT_VALUE_DATE',
+        package: '$TMP',
+        refObjectType: 'DDLS/DF',
+        description: '',
+        refObjectDescription: '',
+      });
+      expect(result.isError).toBeUndefined();
+      expect(post()?.body).toContain('adtcore:description="ZTR_C_PAYMENT_VALUE_DATE"');
+      expect(post()?.body).not.toContain('adtcore:description=""');
+    });
+
     it('SKTD create with a body ARC-1 refuses reports the object as CREATED and points at update', async () => {
       // The POST runs before the body is validated, so a refused body must not read
       // like a plain Markdown error — the KTD now exists and a create retry 409s.
