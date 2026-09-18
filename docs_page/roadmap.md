@@ -744,14 +744,14 @@ SAP confirmed GA of ABAP Cloud Extension for VS Code with built-in agentic AI po
 | **Status** | Open. Zero hits for `deliveryClass` / `sizeCategory` / `bufferingType` / `dataMaintenance` in `src/`. Technical settings are only reachable as free text inside the DDL source ARC-1 passes through verbatim. On SAP's ADT-for-VS-Code roadmap for Q4/2026. |
 
 <a id="feat-73"></a>
-### FEAT-73: Additional Drop-In Server-Driven Types (DRTY, DRAS, DSFI)
+### FEAT-73: Additional Drop-In Server-Driven Types (DRAS, DSFI) — DRTY shipped
 | Field | Value |
 |-------|-------|
 | **Priority** | P3 |
 | **Effort** | S |
 | **Risk** | Low |
-| **Usefulness** | Medium — each is a one-row `SDO_REGISTRY` addition once the budget allows, and DRTY/DRAS are the same DDL-text flavor the 2026-07-21 `sourceFormat` fix made expressible. |
-| **Status** | Open, **blocked on the tool-schema budget** (`WRITE_WIRE_WALL` is a hard ceiling at 68 000 bytes; the surface sits at 67 986). Contracts read live: DRTY `define type …` (DDL text, blues v1, 758 + 816), DRAS `@EndUserText.label … define …` (DDL text, blues v1, instance seen on 816), DSFI (AFF JSON, blues v2, `blue:blueSource` on 816; the 758 metadata GET returned `exc:exception` and needs a per-release check). `createType` is NOT derivable (EVTB=`EVTB/EVB`, DSFD=`DSFD/SCF`) — each type needs its own live `$TMP` create probe. Evidence: [docs/research/2026-07-21-sap-vscode-roadmap-dtdc-dsfd-probe.md](https://github.com/arc-mcp/arc-1/blob/main/docs/research/2026-07-21-sap-vscode-roadmap-dtdc-dsfd-probe.md) |
+| **Usefulness** | Medium — each is a one-row `SDO_REGISTRY` addition, and DRAS is the same DDL-text flavor the 2026-07-21 `sourceFormat` fix made expressible. |
+| **Status** | **DRTY shipped 2026-09-18** — read + write via a one-row `SDO_REGISTRY` entry (`/sap/bc/adt/ddic/drty/sources`, `DRTY/STY`, blues v1, `sourceFormat: 'text'`), live-verified end to end on 8.16 (create, update, activate, read, delete). Evidence: [docs/research/2026-09-18-drty-cds-type-adt-contract.md](https://github.com/arc-mcp/arc-1/blob/main/docs/research/2026-09-18-drty-cds-type-adt-contract.md). The budget objection recorded here is obsolete: `WRITE_WIRE_WALL` is 74 000 bytes, the worst write scenario measures 72 573, and DRTY cost 48 bytes. DRAS and DSFI remain open. Contracts read live: DRAS `@EndUserText.label … define …` (DDL text, blues v1, instance seen on 816), DSFI (AFF JSON, blues v2, `blue:blueSource` on 816; the 758 metadata GET returned `exc:exception` and needs a per-release check). `createType` is NOT derivable (EVTB=`EVTB/EVB`, DSFD=`DSFD/SCF`, DRTY=`DRTY/STY`) — each remaining type needs its own live `$TMP` create probe. Earlier evidence: [docs/research/2026-07-21-sap-vscode-roadmap-dtdc-dsfd-probe.md](https://github.com/arc-mcp/arc-1/blob/main/docs/research/2026-07-21-sap-vscode-roadmap-dtdc-dsfd-probe.md) |
 
 <a id="feat-71"></a>
 ### FEAT-71: Dictionary Activation Log
